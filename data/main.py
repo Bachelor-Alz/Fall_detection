@@ -6,6 +6,8 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import confusion_matrix
 import itertools
 import numpy as np
+import joblib
+
 
 class FallDetection:
     def __init__(self, datafolder, window_size=1.75, overlap=0.5):
@@ -118,10 +120,11 @@ class FallDetection:
         model = RandomForestClassifier(n_estimators=100, random_state=42)
         return model, X, y
 
-    def run_permutations(self, window_sizes, overlaps, n_splits=5):
-        """Run permutations for window sizes and overlaps to find the best configuration."""
+    def run_permutations(self, window_sizes, overlaps, n_splits=5, feature_intervals=3):
+        """Run permutations for window sizes, overlaps, and feature sets to find the best configuration."""
         results = []
 
+        # Iterate through different combinations of window sizes, overlaps, and number of features.
         for window_size, overlap in itertools.product(window_sizes, overlaps):
             self.window_size = window_size
             self.overlap = overlap
@@ -130,44 +133,91 @@ class FallDetection:
             features_df = self.process_data()
             model, X, y = self._train_classifier(features_df)
 
-            skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
-            fold_accuracies = []
-            fold_confusion_matrices = []
+            # Iterate over feature counts (in intervals of feature_intervals)
+            feature_counts = list(range(feature_intervals, X.shape[1] + 1, feature_intervals))
+            
+            for feature_count in feature_counts:
+                # Select a subset of the features
+                selected_features = X.columns[:feature_count]  # Select first 'feature_count' features
+                
+                X_subset = X[selected_features]  # Subset the data
+                skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
+                fold_accuracies = []
+                fold_confusion_matrices = []
 
-            for train_index, test_index in skf.split(X, y):
-                X_train, X_test = X.iloc[train_index], X.iloc[test_index]
-                y_train, y_test = y.iloc[train_index], y.iloc[test_index]
+                for train_index, test_index in skf.split(X_subset, y):
+                    X_train, X_test = X_subset.iloc[train_index], X_subset.iloc[test_index]
+                    y_train, y_test = y.iloc[train_index], y.iloc[test_index]
 
-                model.fit(X_train, y_train)
-                y_pred = model.predict(X_test)
+                    model.fit(X_train, y_train)
+                    y_pred = model.predict(X_test)
 
-                fold_accuracies.append((y_pred == y_test).mean())
-                cm = confusion_matrix(y_test, y_pred)
-                fold_confusion_matrices.append(cm)
+                    fold_accuracies.append((y_pred == y_test).mean())
+                    cm = confusion_matrix(y_test, y_pred)
+                    fold_confusion_matrices.append(cm)
 
-            avg_accuracy = np.mean(fold_accuracies)
-            avg_confusion_matrix = np.mean(fold_confusion_matrices, axis=0)
+                avg_accuracy = np.mean(fold_accuracies)
+                avg_confusion_matrix = np.mean(fold_confusion_matrices, axis=0)
+                avg_confusion_matrix = np.round(avg_confusion_matrix).astype(int)
 
-            results.append((window_size, overlap, avg_accuracy, avg_confusion_matrix))
+                results.append((window_size, overlap, feature_count, avg_accuracy, avg_confusion_matrix))
 
-        sorted_results = sorted(results, key=lambda x: x[2], reverse=True)
+        # Sort results by accuracy in descending order
+        sorted_results = sorted(results, key=lambda x: x[3], reverse=True)
         return sorted_results
+
+
 
 
 # Example usage
 datafolder = os.path.join(os.path.dirname(__file__), '40Hz')
 window_sizes = [2.5, 4]  
-overlaps = [0.6, 0.7]
+overlaps = [0.4, 0.5, 0.6, 0.7]
 
 fall_detection = FallDetection(datafolder)
 sorted_results = fall_detection.run_permutations(window_sizes, overlaps)
 
-print("Configurations sorted from best to worst (based on accuracy):")
-for result in sorted_results:
-    window_size, overlap, avg_accuracy, _ = result
-    print(f"Window size = {window_size}s, Overlap = {overlap}, Accuracy = {avg_accuracy:.4f}")
+# Display sorted results (best to worst accuracy)
+print("Best configurations:")
+for result in sorted_results[:10]:  # Show top 10
+    win_size, overlap, num_features, accuracy, _ = result
+    print(f"Window={win_size}s, Overlap={overlap}, Features={num_features}, Accuracy={accuracy:.4f}")
 
 best_result = sorted_results[0]
-best_conf_matrix = best_result[3]
+best_conf_matrix = best_result[4]
 np.savetxt("best_confusion_matrix.csv", best_conf_matrix, delimiter=",")
 print("Best confusion matrix saved to 'best_confusion_matrix.csv'.")
+
+# Get the best configuration
+best_window_size, best_overlap, best_num_features, best_accuracy, _ = sorted_results[0]
+
+# Set the best parameters
+fall_detection.window_size = best_window_size
+fall_detection.overlap = best_overlap
+fall_detection.features_file = fall_detection._get_features_filename()
+
+# Reprocess the data with the best parameters
+features_df = fall_detection.process_data()
+
+# Train the final model on the full dataset
+model, X, y = fall_detection._train_classifier(features_df)
+model.fit(X, y)
+
+
+# Save the trained model for later use
+joblib.dump(model, "fall_detection_model.pkl")
+print(f"Best model saved with window size {best_window_size}s and overlap {best_overlap}.")
+
+feature_importances = model.feature_importances_
+
+# Create a DataFrame to view feature rankings
+importance_df = pd.DataFrame({
+    'Feature': X.columns,
+    'Importance': feature_importances
+})
+
+# Sort by importance (descending order)
+importance_df = importance_df.sort_values(by="Importance", ascending=False)
+
+# Display the most important features
+print(importance_df)
