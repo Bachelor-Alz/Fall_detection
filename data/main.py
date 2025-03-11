@@ -14,6 +14,7 @@ class FallDetection:
         self.datafolder = datafolder
         self.window_size = window_size
         self.overlap = overlap
+        self.fall_times_df = pd.read_csv('fall_timestamps.csv')
         self.features_file = self._get_features_filename()
         self.all_features = []
 
@@ -22,10 +23,16 @@ class FallDetection:
         accel_data = pd.read_csv(accel_file)
         gyro_data = pd.read_csv(gyro_file)
 
+        # Extract folder and file name
+        folder_name = os.path.basename(os.path.dirname(accel_file))
+        file_name = os.path.splitext(os.path.basename(accel_file))[0] # Remove extension
+        name = folder_name + '/' + file_name[:7] 
+
         accel_data = accel_data.rename(columns={'accel_time_list': 'time'})
         gyro_data = gyro_data.rename(columns={'gyro_time_list': 'time'})
         merged_data = pd.merge(accel_data, gyro_data, on='time', how='outer')
         merged_data = merged_data.sort_values(by='time').interpolate()
+        merged_data['filename'] = name
 
         return merged_data
 
@@ -34,10 +41,9 @@ class FallDetection:
         scaler = StandardScaler()
         accel_columns = ['accel_x_list', 'accel_y_list', 'accel_z_list']
         gyro_columns = ['gyro_x_list', 'gyro_y_list', 'gyro_z_list']
-        
-        df[accel_columns] = scaler.fit_transform(df[accel_columns])
-        df[gyro_columns] = scaler.fit_transform(df[gyro_columns])
-        
+
+        df[accel_columns + gyro_columns] = scaler.fit_transform(df[accel_columns + gyro_columns])
+
         return df
 
     def _compute_statistics(self, window_df, axis):
@@ -54,11 +60,15 @@ class FallDetection:
         }
         return stats
 
-    def _extract_features(self, df, activity_label):
-        """Extract features from the windowed data."""
+    def _extract_features(self, df):
+        """Extract features from the windowed data while considering fall timeframes."""
         window_features = []
         start_time = df['time'].min()
         end_time = df['time'].max()
+        activity_label = df['filename'].iloc[0]
+
+        # Filter relevant fall times for this activity
+        fall_times = self.fall_times_df[self.fall_times_df['filename'] == activity_label]
 
         while start_time + self.window_size <= end_time:
             window_df = df[(df['time'] >= start_time) & (df['time'] < start_time + self.window_size)]
@@ -73,12 +83,20 @@ class FallDetection:
                 # Signal Magnitude Area (SMA)
                 features['SMA_accel'] = window_df[['accel_x_list', 'accel_y_list', 'accel_z_list']].abs().sum(axis=1).mean()
                 features['SMA_gyro'] = window_df[['gyro_x_list', 'gyro_y_list', 'gyro_z_list']].abs().sum(axis=1).mean()
-                features['activity'] = 1 if 'F' in activity_label else 0
+
+                # Check if window overlaps with any fall period
+                is_fall = any(
+                    (features['start_time'] < row['end_time']) and (features['end_time'] > row['start_time'])
+                    for _, row in fall_times.iterrows()
+                )
+
+                features['activity'] = 1 if is_fall else 0
                 window_features.append(features)
 
             start_time += self.window_size * (1 - self.overlap)
-        
+
         return window_features
+
 
     def _get_features_filename(self):
         """Return the filename for saving features based on window size and overlap."""
@@ -94,23 +112,20 @@ class FallDetection:
                 activity_path = os.path.join(self.datafolder, activity_folder)
 
                 if os.path.isdir(activity_path):
-                    accel_file, gyro_file = None, None
-                    for file in os.listdir(activity_path):
-                        if file.endswith("_accel.csv"):
-                            accel_file = os.path.join(activity_path, file)
-                        elif file.endswith("_gyro.csv"):
-                            gyro_file = os.path.join(activity_path, file)
+                    files = os.listdir(activity_path)
+                    sorted_files = sorted(files)
 
-                    if accel_file and gyro_file:
-                        merged_data = self._load_and_clean_data(accel_file, gyro_file)
-                        preprocessed_data = self._preprocess_data(merged_data)
-                        extracted_windows = self._extract_features(preprocessed_data, activity_folder)
-                        self.all_features.extend(extracted_windows)
+                for accel_file, gyro_file in zip(sorted_files[::2], sorted_files[1::2]):
+                    accel_file = os.path.join(activity_path, accel_file)
+                    gyro_file = os.path.join(activity_path, gyro_file)
+                    merged_data = self._load_and_clean_data(accel_file, gyro_file)
+                    preprocessed_data = self._preprocess_data(merged_data)
+                    extracted_windows = self._extract_features(preprocessed_data)
+                    self.all_features.extend(extracted_windows)
 
-            features_df = pd.DataFrame(self.all_features)
-            features_df.to_csv(self.features_file, index=False)
-            print(f"Features saved to {self.features_file}.")
-
+        features_df = pd.DataFrame(self.all_features)
+        features_df.to_csv(self.features_file, index=False)
+        print(f"Features saved to {self.features_file}.")
         return features_df
 
     def _train_classifier(self, features_df):
@@ -171,8 +186,9 @@ class FallDetection:
 
 # Example usage
 datafolder = os.path.join(os.path.dirname(__file__), '40Hz')
-window_sizes = [2.5, 4]  
-overlaps = [0.4, 0.5, 0.6, 0.7]
+window_sizes = [10]
+
+overlaps = [0.6]
 
 fall_detection = FallDetection(datafolder)
 sorted_results = fall_detection.run_permutations(window_sizes, overlaps)
@@ -203,9 +219,6 @@ features_df = fall_detection.process_data()
 model, X, y = fall_detection._train_classifier(features_df)
 model.fit(X, y)
 
-
-# Save the trained model for later use
-joblib.dump(model, "fall_detection_model.pkl")
 print(f"Best model saved with window size {best_window_size}s and overlap {best_overlap}.")
 
 feature_importances = model.feature_importances_
