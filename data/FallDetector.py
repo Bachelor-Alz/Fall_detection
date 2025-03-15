@@ -4,7 +4,7 @@ import os
 from sklearn.preprocessing import MinMaxScaler
 import matplotlib.pyplot as plt
 from typing import Union
-from scipy.ndimage import gaussian_filter1d
+from sklearn.preprocessing import StandardScaler
 import warnings
 warnings.filterwarnings('ignore', category=RuntimeWarning, message=".*Precision loss occurred.*")
 
@@ -78,7 +78,22 @@ class FallDetector:
         return df
     
     def pre_process(self, df: pd.DataFrame):
-        """Pre-processes data: resample to 40Hz and scales sensor data"""
+        """Pre-processes data: resample to 50Hz and scales sensor data"""
+        #Group my UMA and 50Mhz data
+        uma_df = df[df['filename'].str.contains('UMA', na=False)]
+        non_uma_df = df[~df['filename'].str.contains('UMA', na=False)]
+
+        scaler_uma = StandardScaler()
+        scaler_non_uma = StandardScaler()
+
+        columns_to_scale = ['accel_x_list', 'accel_y_list', 'accel_z_list',
+                            'gyro_x_list', 'gyro_y_list', 'gyro_z_list']
+
+        uma_df[columns_to_scale] = scaler_uma.fit_transform(uma_df[columns_to_scale])
+        non_uma_df[columns_to_scale] = scaler_non_uma.fit_transform(non_uma_df[columns_to_scale])
+        df = pd.concat([uma_df, non_uma_df])
+
+        df = self._remove_outliers_iqr(df)
         grouped = df.groupby('filename')
         resampled_df = []
 
@@ -93,138 +108,151 @@ class FallDetector:
         os.makedirs('preprocessed', exist_ok=True)
         df_resampled.to_csv(os.path.join('preprocessed', f'preprocessed_w{self.window_size}_o{self.overlap}.csv'), index=False)
         return df_resampled
+    
+
+
+    def _remove_outliers_iqr(self, df: pd.DataFrame):
+        # Drop 'filename' column for IQR calculation
+        df_numeric = df.drop(columns='filename')
+
+        # Calculate Q1, Q3, and IQR
+        Q1 = df_numeric.quantile(0.25)
+        Q3 = df_numeric.quantile(0.75)
+        IQR = Q3 - Q1
+
+        # Filter out rows with outliers
+        filtered_df = df[~((df_numeric < (Q1 - 1.5 * IQR)) | (df_numeric > (Q3 + 1.5 * IQR))).any(axis=1)]
+        
+        return filtered_df
+
+
 
     def _resample_data(self, group: pd.DataFrame):
-        """Resample the data to 40Hz (25ms interval) while handling duplicates and non-numeric columns."""
+        """Resample the data to 50Hz (20ms interval) while handling duplicates and non-numeric columns.
+        Also aligns the time to start at 00:00.000.
+        """
 
         group['time'] = pd.to_datetime(group['time'], unit='s')  
         group = group.drop_duplicates(subset=['time'])
         group.set_index('time', inplace=True)
+
         numeric_group = group.drop(columns=['filename'])
-        numeric_resampled = numeric_group.resample('20ms').interpolate(method='linear').bfill().ffill()
+        new_start_time = numeric_group.index.min().floor('20ms')  # Align start time to nearest 20ms
+        new_time_index = pd.date_range(start=new_start_time, 
+                                    end=numeric_group.index.max(), 
+                                    freq='20ms')
+
+        numeric_resampled = numeric_group.reindex(new_time_index).interpolate(method='linear').bfill().ffill()
+
         numeric_resampled.reset_index(inplace=True)
+        numeric_resampled.rename(columns={'index': 'time'}, inplace=True)
+
+        # Re-add filename column
         numeric_resampled['filename'] = group['filename'].iloc[0]
+
         return numeric_resampled
+
 
 
     def _classify_fall(self, df: pd.DataFrame):
         #Get 50Mhz data and UMA data
+        df['is_fall'] = 0
         df_uma = df[df['filename'].str.contains('UMA')]
         df_50mhz = df[~df['filename'].str.contains('UMA')]
-
         df_uma = self._classify_umafall(df_uma)
-        exit()
         df_50mhz = self._classify_50mhz(df_50mhz)
         df = pd.concat([df_uma, df_50mhz])
-
-
-    def _classify_umafall(self, df: pd.DataFrame):
-        df = df.copy()  # Ensure df is not a view
-        df['is_fall'] = 0  
-        df['time_start'] = pd.to_numeric(df['time_start'], errors='coerce')  # Ensure numeric type
-        df = df.dropna(subset=['time_start', 'accel_magnitude', 'gyro_magnitude'])  # Remove NaN rows
-        df['time_start'] = df['time_start'].astype('float64') / 10**9  # Convert to seconds
-
-        def extract_first_value(cell):
-            """Ensure that each cell is a single float."""
-            if isinstance(cell, pd.Series):  # Handle Series inside a cell
-                cell = cell.iloc[0]  
-            if isinstance(cell, (list, np.ndarray)):  # If it's a list/array, take the first value
-                return float(cell[0])
-            return float(cell)  # Convert directly if already a scalar
-                    
-        df['accel_magnitude_sma'] = df['accel_magnitude'].apply(extract_first_value)
-        df['gyro_magnitude_sma'] = df['gyro_magnitude_sma'].apply(extract_first_value)
-        
-        # Normalize accel and gyro
-        scaler = MinMaxScaler()
-        df[['accel_magnitude_sma', 'gyro_magnitude_sma']] = scaler.fit_transform(df[['accel_magnitude_sma', 'gyro_magnitude_sma']])
-        grouped = df.groupby('filename')
-        
-        for filename, group in grouped:
-            time_vals = group['time_start'].values
-            accel_vals = group['accel_magnitude_sma'].values
-            gyro_vals = group['gyro_magnitude_sma'].values
-            
-            # Apply heavy smoothing to both accel and gyro values using Gaussian filter
-            smoothed_accel = gaussian_filter1d(accel_vals, sigma=5)  # Adjust sigma for smoothing
-            smoothed_gyro = gaussian_filter1d(gyro_vals, sigma=5)    # Adjust sigma for smoothing
-            
-            # Find the index of largest change in both accel and gyro
-            accel_diff = np.diff(smoothed_accel)
-            gyro_diff = np.diff(smoothed_gyro)
-            
-            accel_peak_idx = np.argmax(np.abs(accel_diff))  # Largest change in accel
-            gyro_peak_idx = np.argmax(np.abs(gyro_diff))    # Largest change in gyro
-            
-            # Calculate dynamic padding based on the largest change
-            max_change_rate = max(np.max(np.abs(accel_diff)), np.max(np.abs(gyro_diff)))
-            fall_padding_time = max(1.0, 2.0 * max_change_rate)  # Dynamic padding
-            
-            # Find the start time by using the index of the largest change
-            smallest_idx = accel_peak_idx if accel_peak_idx < gyro_peak_idx else gyro_peak_idx
-            start_time = max(time_vals[smallest_idx] - fall_padding_time, time_vals[0])
-            
-            # Define a threshold for stabilization (e.g., when the rate of change becomes very small)
-            stabilization_threshold = 0.01  # Rate of change small enough to consider stable
-            
-            # Use a while loop to check if the signals have stabilized
-            is_stable = False
-            end_time = time_vals[-1]  # Start with the last time value
-            
-            while not is_stable:
-                # Check if both accel and gyro are stable (rate of change small)
-                accel_rate_of_change = np.max(np.abs(np.diff(smoothed_accel)))  # Maximum rate of change in accel
-                gyro_rate_of_change = np.max(np.abs(np.diff(smoothed_gyro)))    # Maximum rate of change in gyro
-                
-                # If both signals have stabilized (below threshold), break the loop
-                if accel_rate_of_change < stabilization_threshold and gyro_rate_of_change < stabilization_threshold:
-                    is_stable = True
-                else:
-                    # If not stable, extend the end time and smooth again
-                    fall_padding_time += 0.5  # Extend the fall window
-                    end_time = min(time_vals[-1], time_vals[smallest_idx] + fall_padding_time)
-                    
-                    # Reapply smoothing to get more accurate stabilization
-                    smoothed_accel = gaussian_filter1d(accel_vals[:int(end_time)], sigma=5)
-                    smoothed_gyro = gaussian_filter1d(gyro_vals[:int(end_time)], sigma=5)
-            
-            # Plot the magnitudes and detected fall time range
-            plt.figure(figsize=(12, 5))
-            plt.plot(time_vals, accel_vals, label='Accel Magnitude SMA', color='blue')
-            plt.plot(time_vals, gyro_vals, label='Gyro Magnitude SMA', color='orange')
-            plt.axvline(start_time, color='red', linestyle='--', label='Start Time')
-            plt.axvline(end_time, color='green', linestyle='--', label='End Time')
-            plt.axvspan(start_time, end_time, color='red', alpha=0.3, label='Fall')
-
-            plt.legend()
-            plt.title(f'{filename}')
-            plt.xlabel('Time (s)')
-            plt.ylabel('Magnitude')
-            plt.grid(True)
-            plt.show()
-
         return df
 
+    def _classify_umafall(self, df: pd.DataFrame):
+        # Keep the original dataframe for later
+        og_df = df.copy()
+        scaler = MinMaxScaler()
+
+        df['start_time'] = pd.to_numeric(df['start_time'], errors='coerce')
+        df['end_time'] = pd.to_numeric(df['end_time'], errors='coerce')  # Ensure end_time is numeric
+        df['start_time_sec'] = df['start_time'] / 10**9  # Assuming start_time is in nanoseconds
+        df['end_time_sec'] = df['end_time'] / 10**9  # Convert end_time to seconds as well
+        df[['accel_magnitude_sma', 'gyro_magnitude_sma']] = scaler.fit_transform(df[['accel_magnitude_sma', 'gyro_magnitude_sma']])
+
+        fall_indices = []
+        for _, group in df.groupby('filename'):
+            time_vals = group['start_time_sec'].values
+            accel_vals = group['accel_magnitude_sma'].values
+            gyro_vals = group['gyro_magnitude_sma'].values
+
+            accel_diff = np.diff(accel_vals)
+            gyro_diff = np.diff(gyro_vals)
+
+            change_threshold = 0.01  # Threshold for significant change
+            no_change_duration_limit = 1.5  # Max seconds without change
+
+            # Detect the start of a fall
+            start_idx = next((i for i in range(1, len(accel_diff)) if 
+                            abs(accel_diff[i] - accel_diff[i-1]) > change_threshold or 
+                            abs(gyro_diff[i] - gyro_diff[i-1]) > change_threshold), None)
+
+            if start_idx is None:
+                continue
+
+            start_time = max(time_vals[start_idx] - 1, 0)
+            end_time = start_time
+            last_change_time = start_time
+
+            # Detect the end of the fall
+            for i in range(start_idx, len(time_vals) - 1):
+                if abs(accel_diff[i]) > change_threshold or abs(gyro_diff[i]) > change_threshold:
+                    end_time = time_vals[i]
+                    last_change_time = end_time
+                elif time_vals[i] - last_change_time > no_change_duration_limit:
+                    break  # End the event if no significant change for too long
+
+            for idx, row in group.iterrows():
+                # Direct comparison with seconds-based timestamp
+                if start_time <= row['start_time_sec'] <= end_time or start_time <= row['end_time_sec'] <= end_time:
+                    fall_indices.append(idx)
+
+            self.plot_fall_detection(group['filename'].iloc[0], time_vals, accel_vals, gyro_vals, start_time, end_time)
+
+        # Assign 'is_fall' flag to the original dataframe based on detected fall indices
+        og_df.loc[fall_indices, 'is_fall'] = 1
+        return og_df
 
 
+
+
+    def plot_fall_detection(self, filename, time_vals, accel_vals, gyro_vals, start_time, end_time):
+        plt.figure(figsize=(12, 5))
+        plt.plot(time_vals, accel_vals, label='Accel Magnitude SMA', color='blue')
+        plt.plot(time_vals, gyro_vals, label='Gyro Magnitude SMA', color='orange')
+        plt.axvline(start_time, color='red', linestyle='--', label='Start Time')
+        plt.axvline(end_time, color='green', linestyle='--', label='End Time')
+        plt.axvspan(start_time, end_time, color='red', alpha=0.3, label='Fall')
+        plt.legend()
+        plt.title(f'{filename}')
+        plt.xlabel('Time (s)')
+        plt.ylabel('Magnitude')
+        plt.grid(True)
+        plt.show()
     
     def _classify_50mhz(self, df: pd.DataFrame):
         """Classify falls for 50Mhz data, based on the 'start_time' and 'end_time' columns"""
         df = df.copy()  # Ensure df is not a view
-        df['is_fall'] = 0  # Initialize the 'is_fall' column with 0 (non-fall)
-        fall_dict = self._create_fall_dict() 
+        fall_dict = self._create_fall_dict()
 
         for index, row in df.iterrows():
             filename = row['filename']
-            start_time, end_time = fall_dict.get(filename, (None, None))  
+            start_time, end_time = fall_dict.get(filename, (None, None))
+
             if start_time is not None and end_time is not None:
-                if start_time <= row['start_time'] <= end_time or start_time <= row['end_time'] <= end_time:
+                row_start_time = row['start_time'].timestamp()
+                row_end_time = row['end_time'].timestamp()
+
+                if start_time <= row_start_time <= end_time or start_time <= row_end_time <= end_time:
                     df.loc[index, 'is_fall'] = 1  
 
+
         return df
-
-
 
     def extract_features(self, df: pd.DataFrame):
         """Applies sliding window and extracts statistical features for each filename"""
@@ -241,8 +269,8 @@ class FallDetector:
                 window = group.iloc[i:i + window_size]
                 feature_dict = {
                     'filename': filename,
-                    'time_start': window['time'].iloc[0],
-                    'time_end': window['time'].iloc[-1]
+                    'start_time': window['time'].iloc[0],
+                    'end_time': window['time'].iloc[-1]
                 }
 
                 for col in columns_to_use:
@@ -254,38 +282,16 @@ class FallDetector:
                     feature_dict[f'{col}_iqr'] = window[col].quantile(0.75) - window[col].quantile(0.25)
                     feature_dict[f'{col}_energy'] = np.sum(window[col]**2)
                     feature_dict[f'{col}_rms'] = np.sqrt(np.mean(window[col]**2)) 
-                    sma = np.sum(np.abs(window[col])) / window_size  
-                    feature_dict[f'{col}_sma'] = sma
-              
-                # Calculate Roll and Pitch using Sensor Fusion (Complementary Filter)
-                accel_x = window['accel_x_list'].values
-                accel_y = window['accel_y_list'].values
-                accel_z = window['accel_z_list'].values
-                gyro_x = window['gyro_x_list'].values
-                gyro_y = window['gyro_y_list'].values
-                gyro_z = window['gyro_z_list'].values
-                time_diff = 0.02  # Assuming 50Hz sampling rate
-                
-                roll_accel = np.arctan2(accel_y, np.sqrt(accel_x**2 + accel_z**2)) * (180.0 / np.pi)
-                pitch_accel = np.arctan2(-accel_x, np.sqrt(accel_y**2 + accel_z**2)) * (180.0 / np.pi)
-                
-                roll_gyro = np.cumsum(gyro_x * time_diff)
-                pitch_gyro = np.cumsum(gyro_y * time_diff)
-                yaw_gyro = np.cumsum(gyro_z * time_diff)
-                
-                roll_fused = self.alpha * (roll_gyro) + (1 - self.alpha) * roll_accel
-                pitch_fused = self.alpha * (pitch_gyro) + (1 - self.alpha) * pitch_accel
-                
-                feature_dict['roll_mean'] = roll_fused.mean()
-                feature_dict['roll_std'] = roll_fused.std()
-                feature_dict['pitch_mean'] = pitch_fused.mean()
-                feature_dict['pitch_std'] = pitch_fused.std()
-                feature_dict['yaw_mean'] = yaw_gyro.mean()
-                feature_dict['yaw_std'] = yaw_gyro.std()
+                    feature_dict[f'{col}_sma'] = np.sum(np.abs(window[col])) / window_size  
+                    feature_dict[f'{col}_skew'] = window[col].skew()
+                    feature_dict[f'{col}_kurtosis'] = window[col].kurtosis()
+                    feature_dict[f'{col}_absum'] = np.sum(np.abs(window[col]))
 
-                # Compute accel magnitude
+                    feature_dict[f'{col}_DDM']  = feature_dict[f'{col}_max'] - feature_dict[f'{col}_min']
+                    feature_dict[f'{col}_GMM'] = np.sqrt((feature_dict[f'{col}_max'] - feature_dict[f'{col}_min'])**2 + (np.argmax(feature_dict[f'{col}_max']) - np.argmax(feature_dict[f'{col}_min']))**2)
+                    feature_dict[f'{col}_MD'] = max(np.diff(window[col]))
+
                 accel_magnitude = np.sqrt(window['accel_x_list']**2 + window['accel_y_list']**2 + window['accel_z_list']**2)
-                feature_dict['accel_magnitude'] = accel_magnitude
                 feature_dict['accel_magnitude_mean'] = accel_magnitude.mean()
                 feature_dict['accel_magnitude_std'] = accel_magnitude.std()
                 feature_dict['accel_magnitude_min'] = accel_magnitude.min()
@@ -296,9 +302,7 @@ class FallDetector:
                 feature_dict['accel_magnitude_rms'] = np.sqrt(np.mean(accel_magnitude**2))
                 feature_dict['accel_magnitude_sma'] = np.sum(np.abs(accel_magnitude)) / window_size
 
-                # Compute gyro magnitude
                 gyro_magnitude = np.sqrt(window['gyro_x_list']**2 + window['gyro_y_list']**2 + window['gyro_z_list']**2)
-                feature_dict['gyro_magnitude'] = gyro_magnitude
                 feature_dict['gyro_magnitude_mean'] = gyro_magnitude.mean()
                 feature_dict['gyro_magnitude_std'] = gyro_magnitude.std()
                 feature_dict['gyro_magnitude_min'] = gyro_magnitude.min()
@@ -308,10 +312,15 @@ class FallDetector:
                 feature_dict['gyro_magnitude_energy'] = np.sum(gyro_magnitude**2)
                 feature_dict['gyro_magnitude_rms'] = np.sqrt(np.mean(gyro_magnitude**2))
                 feature_dict['gyro_magnitude_sma'] = np.sum(np.abs(gyro_magnitude)) / window_size
+
                 features.append(feature_dict)
+    
 
         features_df = pd.DataFrame(features)
         features_df = self._classify_fall(features_df)
+        cols = ['is_fall'] + [col for col in features_df.columns if col != 'is_fall']
+        features_df = features_df[cols]
+
         # Save to features folder
         os.makedirs('features', exist_ok=True)
         features_df.to_csv(self.get_file_path(), index=False)

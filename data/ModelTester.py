@@ -1,26 +1,29 @@
+from matplotlib import pyplot as plt
+from sklearn.datasets import make_classification
+from sklearn.decomposition import PCA
+from sklearn.feature_selection import RFE
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import StratifiedKFold
+from sklearn.ensemble import RandomForestClassifier
+from imblearn.over_sampling import SMOTE
+from sklearn.metrics import balanced_accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
+from joblib import Parallel, delayed
+from FallDetector import FallDetector
 import pandas as pd
 import numpy as np
 import os
 import datetime
 import pytz
-from sklearn.metrics import confusion_matrix, precision_score, recall_score, f1_score, balanced_accuracy_score
-from sklearn.preprocessing import StandardScaler
-from FallDetector import FallDetector
-from sklearn.model_selection import StratifiedKFold
-from sklearn.feature_selection import RFE
-from sklearn.ensemble import RandomForestClassifier
-from imblearn.over_sampling import SMOTE
-from joblib import Parallel, delayed
-
 class ModelTester:
-    def __init__(self, configs, datafolder=os.path.join(os.getcwd(), '50Hz'), results_file="results.csv", n_features=20, n_kfolds=5):
+    def __init__(self, configs, datafolder=os.path.join(os.getcwd(), '50Hz'), results_file="results.csv", n_features=50, n_kfolds=5, n_components=0.90):
         """Initialize the tester with multiple configurations."""
         self.configs = configs  # List of configurations (window_size, overlap)
         self.datafolder = datafolder
         self.results_file = results_file  # Path to store results
-        self.results = []
         self.n_features = n_features
         self.n_kfolds = n_kfolds
+        self.n_components = n_components  # The amount of variance to preserve with PCA
+        self.metrics = []
 
     def run_tests(self):
         """Runs fall detection with different configurations and evaluates models."""
@@ -34,54 +37,61 @@ class ModelTester:
                 print(f"Loading features from {features_file}")
                 features_df = pd.read_csv(features_file)
             else:
+                print(f"Features file not found. Generating features...")
                 df = fall_detector.load_data()
                 df = fall_detector.pre_process(df)
                 features_df = fall_detector.extract_features(df)
-                ##TODO REMOVE RETURN
-                return
 
             if features_df.isnull().values.any():
                 features_df.dropna(inplace=True)
+            
+            self.metrics.append(self.evaluate_model(features_df, window_size, overlap))
 
-            metrics_df = self.evaluate_model(features_df, window_size, overlap)
-            self.results.append(metrics_df)
+        final_results = pd.DataFrame(self.metrics)
 
-
-        final_results_df = pd.DataFrame(self.results)
+        # Save to CSV
         os.makedirs('results', exist_ok=True)
         if os.path.exists(self.results_file):
-            final_results_df.to_csv(self.results_file, mode='a', header=False, index=False)
+            final_results.to_csv(self.results_file, mode='a', header=False, index=False)
         else:
-            final_results_df.to_csv(self.results_file, index=False)
+            final_results.to_csv(self.results_file, index=False)
 
     def evaluate_model(self, df, window_size, overlap):
         print(f"Evaluating model {window_size, overlap}")
-
-        X = df.drop(columns=['is_fall', 'filename', 'time_start', 'time_end'])
+        print(df['is_fall'].value_counts())
+        X = df.drop(columns=['is_fall', 'filename', 'start_time', 'end_time'])
         y = df['is_fall'].reset_index(drop=True)
         scaler = StandardScaler()
         X_scaled = scaler.fit_transform(X)
-        strat_kfold = StratifiedKFold(n_splits=self.n_kfolds, shuffle=True, random_state=42)
-        n_jobs = max(1, os.cpu_count() // 2)  
+        
+        # Apply PCA
+        pca = PCA(n_components=self.n_components)  # n_components = 0.95 means preserving 95% of variance
+        X_pca = pca.fit_transform(X_scaled)
 
+        strat_kfold = StratifiedKFold(n_splits=self.n_kfolds, shuffle=True, random_state=42)
+        n_jobs = max(1, os.cpu_count() // 2 + 1)  # Adjust n_jobs based on available CPU cores
+
+        # Function to process each fold
         def process_fold(train_index, test_index, fold_num):
             print(f"Running fold {fold_num}/{self.n_kfolds}")
-            X_train, X_test = X_scaled[train_index], X_scaled[test_index]
+            X_train, X_test = X_pca[train_index], X_pca[test_index]
             y_train, y_test = y.iloc[train_index], y.iloc[test_index]
 
-            # Feature selection before SMOTE
-            model = RandomForestClassifier(random_state=42, n_jobs=-1)
-            selector = RFE(estimator=model, n_features_to_select=self.n_features)
-            X_train_selected = selector.fit_transform(X_train, y_train)
-            X_test_selected = selector.transform(X_test)
-
-            # Apply SMOTE on selected features
+            # Apply SMOTE on PCA-transformed features
             smote = SMOTE(random_state=42)
-            X_train_smote, y_train_smote = smote.fit_resample(X_train_selected, y_train)
+            X_train_smote, y_train_smote = smote.fit_resample(X_train, y_train)
             
+            model = RandomForestClassifier(random_state=42, n_jobs=-1)
             model.fit(X_train_smote, y_train_smote)  # Train on balanced dataset
-            y_pred = model.predict(X_test_selected)
+            y_pred = model.predict(X_test)
 
+            # Print feature importances
+            pca_importance = np.abs(pca.components_.T @ pca.explained_variance_ratio_)
+            feature_importance_pca = pd.DataFrame({'Feature': X.columns, 'PCA_Weighted_Importance': pca_importance})
+            feature_importance_pca = feature_importance_pca.sort_values(by='PCA_Weighted_Importance', ascending=False)
+            print(feature_importance_pca.to_string())
+
+            # Return a dictionary of metrics for each fold
             return {
                 "balanced_acc": balanced_accuracy_score(y_test, y_pred),
                 "precision": precision_score(y_test, y_pred),
@@ -90,41 +100,84 @@ class ModelTester:
                 "conf_matrix": confusion_matrix(y_test, y_pred)
             }
 
+        # Parallel execution for each fold
         results = Parallel(n_jobs=n_jobs, backend="loky")(
             delayed(process_fold)(train_idx, test_idx, fold + 1)
-            for fold, (train_idx, test_idx) in enumerate(strat_kfold.split(X_scaled, y))
+            for fold, (train_idx, test_idx) in enumerate(strat_kfold.split(X_pca, y))
         )
 
+        # Aggregate the results
         avg_metrics = {key: np.mean([res[key] for res in results]) for key in ["balanced_acc", "precision", "recall", "f1"]}
         avg_conf_matrix = np.mean([res["conf_matrix"] for res in results], axis=0).astype(int)
         tn, fp, fn, tp = avg_conf_matrix.ravel()
 
-        return pd.DataFrame([{
-                'date': datetime.datetime.now(pytz.utc).strftime('%Y-%m-%d %H:%M:%S'),
-                'window_size': window_size,
-                'overlap': overlap,
-                'balanced_accuracy': avg_metrics["balanced_acc"],
-                'precision': avg_metrics["precision"],
-                'recall': avg_metrics["recall"],
-                'f1_score': avg_metrics["f1"],
-                'true_negatives': tn,
-                'false_positives': fp,
-                'false_negatives': fn,
-                'true_positives': tp
-            }])
-
+        # Return a DataFrame with the aggregated results
+        return {
+            'date': datetime.datetime.now(pytz.utc).strftime('%Y-%m-%d %H:%M:%S'),
+            'window_size': window_size,
+            'overlap': overlap,
+            'n_features': self.n_features,
+            'n_kfolds': self.n_kfolds,
+            'balanced_accuracy': avg_metrics["balanced_acc"],
+            'precision': avg_metrics["precision"],
+            'recall': avg_metrics["recall"],
+            'f1_score': avg_metrics["f1"],
+            'true_negatives': tn,
+            'false_positives': fp,
+            'false_negatives': fn,
+            'true_positives': tp
+        }
 
     def get_results(self):
         """Returns the results of the tests."""
         if os.path.exists(self.results_file):
             return pd.read_csv(self.results_file).sort_values(by='balanced_accuracy', ascending=False)
         else:
-            return pd.DataFrame(columns=['date', 'window_size', 'overlap', 'balanced_accuracy', 'precision', 'recall', 'f1_score',
-                                         'true_negatives', 'false_positives', 'false_negatives', 'true_positives'])
+            return self.metrics
+        
+    def visualize_smote(self, features_file_path): 
 
+        #Load data
+        df = pd.read_csv(features_file_path)
+        X = df.drop(columns=['is_fall', 'filename', 'start_time', 'end_time'])
+        y = df['is_fall'].reset_index(drop=True)
+
+        
+
+        # Create imbalanced data
+        X, y = make_classification(n_classes=2, weights=[0.9, 0.1], n_features=10, random_state=42)
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(X)
+
+        # Apply PCA to reduce to 2D for visualization
+        pca = PCA(n_components=2)
+        X_pca = pca.fit_transform(X_scaled)
+
+        # Apply SMOTE
+        smote = SMOTE(random_state=42)
+        X_resampled, y_resampled = smote.fit_resample(X_scaled, y)
+
+        # Apply PCA again to visualize synthetic vs. original
+        X_resampled_pca = pca.transform(X_resampled)
+
+        # Plot original vs. synthetic data
+        plt.figure(figsize=(8,6))
+        plt.scatter(X_pca[y == 0, 0], X_pca[y == 0, 1], label="Majority Class (Original)", alpha=0.5)
+        plt.scatter(X_pca[y == 1, 0], X_pca[y == 1, 1], label="Minority Class (Original)", color='red', alpha=0.5)
+        plt.scatter(X_resampled_pca[len(y):, 0], X_resampled_pca[len(y):, 1], label="Synthetic Minority (SMOTE)", color='green', alpha=0.5)
+
+        plt.legend()
+        plt.xlabel("PCA Feature 1")
+        plt.ylabel("PCA Feature 2")
+        plt.title("SMOTE: Original vs. Synthetic Data Points")
+        plt.show()
 
 # Example usage
-tester = ModelTester(configs=[(150, 60)])
+tester = ModelTester(configs=[(50, 40)
+                               ], n_kfolds=5)
 tester.run_tests()
 results = tester.get_results()
 print(results)
+
+
+ModelTester(configs=[(50, 40)], n_kfolds=5).visualize_smote(os.path.join(os.getcwd(), 'features', 'features_w50_o40.csv'))
