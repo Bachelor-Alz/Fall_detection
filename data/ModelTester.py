@@ -8,16 +8,17 @@ from imblearn.over_sampling import SMOTE
 from sklearn.metrics import balanced_accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
 from joblib import Parallel, delayed
 from FallDetector import FallDetector
+from LoadData import UmaFallLoader, WedaFallLoader
 import pandas as pd
 import numpy as np
 import os
 import datetime
 import pytz
 class ModelTester:
-    def __init__(self, configs, datafolder=os.path.join(os.getcwd(), 'WEDAFall'), results_file="results.csv", n_features=50, n_kfolds=5, n_components=0.90):
+    def __init__(self, configs, results_file="results.csv", n_features=50, n_kfolds=5, n_components=0.90):
         """Initialize the tester with multiple configurations."""
         self.configs = configs  # List of configurations (window_size, overlap)
-        self.datafolder = datafolder
+
         self.results_file = results_file  # Path to store results
         self.n_features = n_features
         self.n_kfolds = n_kfolds
@@ -29,7 +30,9 @@ class ModelTester:
         for config in self.configs:
             window_size, overlap = config
             print(f"Testing configuration: window_size={window_size}, overlap={overlap}")
-            fall_detector = FallDetector(window_size, overlap, self.datafolder)
+            uma_loader = UmaFallLoader(os.path.join(os.getcwd(), 'UMAFall'), 'UMA_fall_timestamps.csv')
+            weda_loader = WedaFallLoader(os.path.join(os.getcwd(), 'WEDAFall'), 'WEDA_fall_timestamps.csv')
+            fall_detector = FallDetector(window_size, overlap, [uma_loader, weda_loader])
             features_file = fall_detector.get_file_path()
 
             if os.path.exists(features_file):
@@ -47,9 +50,6 @@ class ModelTester:
             self.metrics.append(self.evaluate_model(features_df, window_size, overlap))
 
         final_results = pd.DataFrame(self.metrics)
-
-        # Save to CSV
-        os.makedirs('results', exist_ok=True)
         if os.path.exists(self.results_file):
             final_results.to_csv(self.results_file, mode='a', header=False, index=False)
         else:
