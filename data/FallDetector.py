@@ -17,17 +17,17 @@ class FallDetector:
         self.overlap = overlap
         self.fall_timestamps = pd.read_csv('fall_timestamps.csv')
         self.datafolder = datafolder
-        self.alpha = 0.98
 
     def load_data(self):
         folders = os.listdir(self.datafolder)
         sorted_folders = sorted(folders)
         df = pd.DataFrame()
 
-        # 50 Mhz
+        # 50 MHz
         for folder in sorted_folders:
             files = os.listdir(os.path.join(self.datafolder, folder))
             sorted_files = sorted(files)
+            
             for accel, gyro in zip(sorted_files[0::2], sorted_files[1::2]):
                 if "accel" not in accel or "gyro" not in gyro:
                     raise ValueError(f"File mismatch: Expected accel & gyro pair but got '{accel}' and '{gyro}'")
@@ -45,24 +45,25 @@ class FallDetector:
                 df = pd.concat([df, merged])
 
 
+        # UMA Fall
         uma_data = os.path.join(os.getcwd(), 'UMAFall')
 
-        #UMA Fall
         for file in os.listdir(uma_data):
-            file_path = os.path.join(uma_data, file)  
-            uma_df = pd.read_csv(file_path, skiprows=40, sep=';')  
+            file_path = os.path.join(uma_data, file)
+            
+            # Read the CSV and process
+            uma_df = pd.read_csv(file_path, skiprows=40, sep=';') 
             uma_df.columns = uma_df.columns.str.strip()
             uma_df.dropna(axis=1, how='all', inplace=True)
-            
-            NEEDED_SENSOR_ID = 4
+            WRIST_SENSOR_ID = 3
             ACCELERO_SENSOR_TYPE = 0
             GYRO_SENSOR_TYPE = 1
 
-            uma_df = uma_df[uma_df['Sensor ID'] == NEEDED_SENSOR_ID]
+            uma_df = uma_df[uma_df['Sensor ID'] == WRIST_SENSOR_ID]
             uma_df = uma_df[uma_df['Sensor Type'].isin([GYRO_SENSOR_TYPE, ACCELERO_SENSOR_TYPE])]
             uma_df = uma_df.rename(columns={'% TimeStamp': 'time'})
             
-            #convert timestamp in ms to seconds
+            # Convert timestamp in ms to seconds
             uma_df['time'] = uma_df['time'] / 1000
 
             acc_df = uma_df[uma_df['Sensor Type'] == ACCELERO_SENSOR_TYPE]
@@ -74,8 +75,8 @@ class FallDetector:
             uma_df = pd.merge(how='outer', on='time', left=acc_df, right=gyro_df)
             uma_df['filename'] = file
             df = pd.concat([df, uma_df])
-
         return df
+
     
     def pre_process(self, df: pd.DataFrame):
         """Pre-processes data: resample to 50Hz and scales sensor data"""
@@ -114,15 +115,12 @@ class FallDetector:
     def _remove_outliers_iqr(self, df: pd.DataFrame):
         # Drop 'filename' column for IQR calculation
         df_numeric = df.drop(columns='filename')
-
-        # Calculate Q1, Q3, and IQR
         Q1 = df_numeric.quantile(0.25)
         Q3 = df_numeric.quantile(0.75)
         IQR = Q3 - Q1
 
         # Filter out rows with outliers
         filtered_df = df[~((df_numeric < (Q1 - 1.5 * IQR)) | (df_numeric > (Q3 + 1.5 * IQR))).any(axis=1)]
-        
         return filtered_df
 
 
@@ -135,7 +133,6 @@ class FallDetector:
         group['time'] = pd.to_datetime(group['time'], unit='s')  
         group = group.drop_duplicates(subset=['time'])
         group.set_index('time', inplace=True)
-
         numeric_group = group.drop(columns=['filename'])
         new_start_time = numeric_group.index.min().floor('20ms')  # Align start time to nearest 20ms
         new_time_index = pd.date_range(start=new_start_time, 
@@ -143,11 +140,8 @@ class FallDetector:
                                     freq='20ms')
 
         numeric_resampled = numeric_group.reindex(new_time_index).interpolate(method='linear').bfill().ffill()
-
         numeric_resampled.reset_index(inplace=True)
         numeric_resampled.rename(columns={'index': 'time'}, inplace=True)
-
-        # Re-add filename column
         numeric_resampled['filename'] = group['filename'].iloc[0]
 
         return numeric_resampled
@@ -176,7 +170,20 @@ class FallDetector:
         df[['accel_magnitude_sma', 'gyro_magnitude_sma']] = scaler.fit_transform(df[['accel_magnitude_sma', 'gyro_magnitude_sma']])
 
         fall_indices = []
-        for _, group in df.groupby('filename'):
+
+        # Ensure the file is created if it doesn't exist already
+        if not os.path.exists('UMA_fall_timestamps.csv'):
+            fall_columns = ['filename', 'start_time', 'end_time']
+            pd.DataFrame(columns=fall_columns).to_csv('UMA_fall_timestamps.csv', index=False)
+
+        #print how many groups are in the dataframe
+        print(f"Number of groups in dataframe: {len(df.groupby('filename'))}")
+
+        for filename, group in df.groupby('filename'):
+            #if the filename is already in UMA_fall_timestamps.csv, skip it
+            if filename in pd.read_csv('UMA_fall_timestamps.csv')['filename'].values:
+                continue
+
             time_vals = group['start_time_sec'].values
             accel_vals = group['accel_magnitude_sma'].values
             gyro_vals = group['gyro_magnitude_sma'].values
@@ -193,7 +200,7 @@ class FallDetector:
                             abs(gyro_diff[i] - gyro_diff[i-1]) > change_threshold), None)
 
             if start_idx is None:
-                continue
+                start_idx = 0
 
             start_time = max(time_vals[start_idx] - 1, 0)
             end_time = start_time
@@ -212,13 +219,13 @@ class FallDetector:
                 if start_time <= row['start_time_sec'] <= end_time or start_time <= row['end_time_sec'] <= end_time:
                     fall_indices.append(idx)
 
-            self.plot_fall_detection(group['filename'].iloc[0], time_vals, accel_vals, gyro_vals, start_time, end_time)
+            # Plot fall detection
+            results = self.plot_fall_detection(group['filename'].iloc[0], time_vals, accel_vals, gyro_vals, start_time, end_time)
+            pd.DataFrame([results]).to_csv('UMA_fall_timestamps.csv', mode='a', header=False, index=False)
 
         # Assign 'is_fall' flag to the original dataframe based on detected fall indices
         og_df.loc[fall_indices, 'is_fall'] = 1
         return og_df
-
-
 
 
     def plot_fall_detection(self, filename, time_vals, accel_vals, gyro_vals, start_time, end_time):
@@ -234,7 +241,10 @@ class FallDetector:
         plt.ylabel('Magnitude')
         plt.grid(True)
         plt.show()
-    
+        start_time, end_time = map(float, input(f"Enter fall start and end time for {filename} (separated by space): ").split())
+        return {'filename': filename, 'start_time': start_time, 'end_time': end_time}
+
+        
     def _classify_50mhz(self, df: pd.DataFrame):
         """Classify falls for 50Mhz data, based on the 'start_time' and 'end_time' columns"""
         df = df.copy()  # Ensure df is not a view

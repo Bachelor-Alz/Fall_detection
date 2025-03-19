@@ -1,7 +1,6 @@
 from matplotlib import pyplot as plt
 from sklearn.datasets import make_classification
 from sklearn.decomposition import PCA
-from sklearn.feature_selection import RFE
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import StratifiedKFold
 from sklearn.ensemble import RandomForestClassifier
@@ -15,7 +14,7 @@ import os
 import datetime
 import pytz
 class ModelTester:
-    def __init__(self, configs, datafolder=os.path.join(os.getcwd(), '50Hz'), results_file="results.csv", n_features=50, n_kfolds=5, n_components=0.90):
+    def __init__(self, configs, datafolder=os.path.join(os.getcwd(), 'WEDAFall'), results_file="results.csv", n_features=50, n_kfolds=5, n_components=0.90):
         """Initialize the tester with multiple configurations."""
         self.configs = configs  # List of configurations (window_size, overlap)
         self.datafolder = datafolder
@@ -180,4 +179,4 @@ results = tester.get_results()
 print(results)
 
 
-ModelTester(configs=[(50, 40)], n_kfolds=5).visualize_smote(os.path.join(os.getcwd(), 'features', 'features_w50_o40.csv'))
+#ModelTester(configs=[(50, 40)], n_kfolds=5).visualize_smote(os.path.join(os.getcwd(), 'features', 'features_w50_o40.csv'))
