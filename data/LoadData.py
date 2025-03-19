@@ -1,6 +1,7 @@
 import os 
 import pandas as pd
 from abc import ABC, abstractmethod
+from sklearn.preprocessing import MinMaxScaler
 
 class BaseLoader(ABC):
     def __init__(self, folder_path: str, timestamp_file: str):
@@ -44,6 +45,8 @@ class WedaFallLoader(BaseLoader):
                 merged['filename'] = folder + '/' + accel[0:7]
                 df = pd.concat([df, merged])
 
+        #Create fall_start and fall_end columns based on timestamps csv using filename column as key
+        df = pd.merge(df, self.timestamps, how='left', left_on='filename', right_on='filename')
         return df
 
 
@@ -57,9 +60,8 @@ class UmaFallLoader(BaseLoader):
 
     def load_data(self):
         df = pd.DataFrame()
-        uma_data = os.path.join(self.datafolder, 'UMAFall')
-        for file in os.listdir(uma_data):
-            file_path = os.path.join(uma_data, file)
+        for file in os.listdir(self.datafolder):
+            file_path = os.path.join(self.datafolder, file)
             
             # Read the CSV and process
             uma_df = pd.read_csv(file_path, skiprows=40, sep=';') 
@@ -87,5 +89,8 @@ class UmaFallLoader(BaseLoader):
             uma_df['filename'] = file
             df = pd.concat([df, uma_df])
         
+        #Create fall_start and fall_end columns based on timestamps csv using filename column as key
+        df = pd.merge(df, self.timestamps, how='left', left_on='filename', right_on='filename')
+
         return df
     

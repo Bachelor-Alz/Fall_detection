@@ -5,6 +5,7 @@ from typing import Union
 from sklearn.preprocessing import StandardScaler
 import warnings
 from LoadData import BaseLoader
+from concurrent.futures import ThreadPoolExecutor
 
 warnings.filterwarnings('ignore', category=RuntimeWarning, message=".*Precision loss occurred.*")
 StrPath = Union[str, os.PathLike]
@@ -18,10 +19,21 @@ class FallDetector:
 
     def load_data(self):
         """Loads data from all data loaders"""
-        df = pd.concat([loader.load_data() for loader in self.data_loaders])
-        return df
-        
 
+        def load_single_loader(loader):
+            return loader.load_data()
+
+        with ThreadPoolExecutor() as executor:
+            data_frames = list(executor.map(load_single_loader, self.data_loaders))
+
+        # Combine all loaded data
+        df = pd.concat(data_frames)
+
+        # Common operations for all datasets
+        df['start_time'] = pd.to_datetime(df['start_time'], unit='s')
+        df['end_time'] = pd.to_datetime(df['end_time'], unit='s')
+        df['time'] = pd.to_datetime(df['time'], unit='s')
+        return df
     
     def pre_process(self, df: pd.DataFrame):
         """Pre-processes data: resample to 50Hz and scales sensor data"""
@@ -52,7 +64,6 @@ class FallDetector:
         return df_resampled
     
 
-
     def _remove_outliers_iqr(self, df: pd.DataFrame):
         # Drop 'filename' column for IQR calculation
         df_numeric = df.drop(columns='filename')
@@ -65,17 +76,16 @@ class FallDetector:
         return filtered_df
 
 
-
     def _resample_data(self, group: pd.DataFrame):
         """Resample the data to 50Hz (20ms interval) while handling duplicates and non-numeric columns.
         Also aligns the time to start at 00:00.000.
-        """
-
-        group['time'] = pd.to_datetime(group['time'], unit='s')  
+        """  
         group = group.drop_duplicates(subset=['time'])
         group.set_index('time', inplace=True)
         numeric_group = group.drop(columns=['filename'])
-        new_start_time = numeric_group.index.min().floor('20ms')  # Align start time to nearest 20ms
+
+        # Align start time to nearest 20ms
+        new_start_time = numeric_group.index.min().floor('20ms')  
         new_time_index = pd.date_range(start=new_start_time, 
                                     end=numeric_group.index.max(), 
                                     freq='20ms')
@@ -84,28 +94,7 @@ class FallDetector:
         numeric_resampled.reset_index(inplace=True)
         numeric_resampled.rename(columns={'index': 'time'}, inplace=True)
         numeric_resampled['filename'] = group['filename'].iloc[0]
-
         return numeric_resampled
-
-        
-    def _classify_50mhz(self, df: pd.DataFrame):
-        """Classify falls for 50Mhz data, based on the 'start_time' and 'end_time' columns"""
-        df = df.copy()  # Ensure df is not a view
-        fall_dict = self._create_fall_dict()
-
-        for index, row in df.iterrows():
-            filename = row['filename']
-            start_time, end_time = fall_dict.get(filename, (None, None))
-
-            if start_time is not None and end_time is not None:
-                row_start_time = row['start_time'].timestamp()
-                row_end_time = row['end_time'].timestamp()
-
-                if start_time <= row_start_time <= end_time or start_time <= row_end_time <= end_time:
-                    df.loc[index, 'is_fall'] = 1  
-
-
-        return df
 
     def extract_features(self, df: pd.DataFrame):
         """Applies sliding window and extracts statistical features for each filename"""
@@ -120,11 +109,22 @@ class FallDetector:
             # Apply sliding window for each group
             for i in range(0, len(group) - window_size + 1, step_size):
                 window = group.iloc[i:i + window_size]
+
+                # Check if either start_time or end_time is NaN, and label as 0 if so
+                if window['start_time'].isna().any() or window['end_time'].isna().any():
+                    is_fall = 0
+                else:
+                    
+                    fall_samples_in_window = ((window['time'] >= window['start_time']) & 
+                                            (window['time'] <= window['end_time'])).sum()
+                    is_fall = 1 if fall_samples_in_window / window_size >= 0.5 else 0
+
                 feature_dict = {
                     'filename': filename,
                     'start_time': window['time'].iloc[0],
-                    'end_time': window['time'].iloc[-1]
-                }
+                    'end_time': window['time'].iloc[-1],
+                    'is_fall': is_fall
+}
 
                 for col in columns_to_use:
                     feature_dict[f'{col}_mean'] = window[col].mean()
@@ -170,9 +170,7 @@ class FallDetector:
     
 
         features_df = pd.DataFrame(features)
-        features_df = self._classify_fall(features_df)
-        cols = ['is_fall'] + [col for col in features_df.columns if col != 'is_fall']
-        features_df = features_df[cols]
+
         # Save to features folder
         os.makedirs('features', exist_ok=True)
         features_df.to_csv(self.get_file_path(), index=False)
