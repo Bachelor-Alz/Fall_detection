@@ -43,9 +43,6 @@ class ModelTester:
                 df = fall_detector.load_data()
                 df = fall_detector.pre_process(df)
                 features_df = fall_detector.extract_features(df)
-
-            if features_df.isnull().values.any():
-                features_df.dropna(inplace=True)
             
             self.metrics.append(self.evaluate_model(features_df, window_size, overlap))
 
@@ -171,12 +168,14 @@ class ModelTester:
         plt.title("SMOTE: Original vs. Synthetic Data Points")
         plt.show()
 
-# Example usage
-tester = ModelTester(configs=[(50, 40)
-                               ], n_kfolds=5)
-tester.run_tests()
-results = tester.get_results()
-print(results)
+if __name__ == '__main__':
+    # Example usage
+    tester = ModelTester(configs=[(45, 40)
+                                ], n_kfolds=5)
+    tester.run_tests()
+    results = tester.get_results()
+    print(results)
 
 
-#ModelTester(configs=[(50, 40)], n_kfolds=5).visualize_smote(os.path.join(os.getcwd(), 'features', 'features_w50_o40.csv'))
+    #ModelTester(configs=[(50, 40)], n_kfolds=5).visualize_smote(os.path.join(os.getcwd(), 'features', 'features_w50_o40.csv'))
+
