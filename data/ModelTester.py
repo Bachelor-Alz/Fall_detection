@@ -18,7 +18,6 @@ class ModelTester:
     def __init__(self, configs, results_file="results.csv", n_features=50, n_kfolds=5, n_components=0.90):
         """Initialize the tester with multiple configurations."""
         self.configs = configs  # List of configurations (window_size, overlap)
-
         self.results_file = results_file  # Path to store results
         self.n_features = n_features
         self.n_kfolds = n_kfolds
@@ -170,12 +169,14 @@ class ModelTester:
 
 if __name__ == '__main__':
     # Example usage
-    tester = ModelTester(configs=[(45, 40)
+    """     
+    tester = ModelTester(configs=[(45, 35)
                                 ], n_kfolds=5)
     tester.run_tests()
     results = tester.get_results()
     print(results)
+     """
 
 
-    #ModelTester(configs=[(50, 40)], n_kfolds=5).visualize_smote(os.path.join(os.getcwd(), 'features', 'features_w50_o40.csv'))
+    ModelTester(configs=[(50, 40)], n_kfolds=5).visualize_smote(os.path.join(os.getcwd(), 'features', 'features_w50_o40.csv'))
 
