@@ -1,182 +1,196 @@
+import re
 import pandas as pd
 import numpy as np
 import os
 from typing import Union
-from scipy.stats import kurtosis, skew
-from sklearn.discriminant_analysis import StandardScaler
+from sklearn.preprocessing import StandardScaler
 import warnings
+from LoadData import BaseLoader
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+
 warnings.filterwarnings('ignore', category=RuntimeWarning, message=".*Precision loss occurred.*")
-
-
 StrPath = Union[str, os.PathLike]
 
 class FallDetector:
-    def __init__(self, window_size: int, overlap: int, datafolder: StrPath):
+    def __init__(self, window_size: int, overlap: int, data_loaders: list[BaseLoader]):
         self.window_size = window_size
         self.overlap = overlap
-        self.fall_timestamps = pd.read_csv('fall_timestamps.csv')
-        self.datafolder = datafolder
-        self.alpha = 0.98
+        self.data_loaders = data_loaders
+
 
     def load_data(self):
-        folders = os.listdir(self.datafolder)
-        sorted_folders = sorted(folders)
-        df = pd.DataFrame()
+        """Loads data from all data loaders"""
 
-        for folder in sorted_folders:
-            files = os.listdir(os.path.join(self.datafolder, folder))
-            sorted_files = sorted(files)
-            for accel, gyro in zip(sorted_files[0::2], sorted_files[1::2]):
-                if "accel" not in accel or "gyro" not in gyro:
-                    raise ValueError(f"File mismatch: Expected accel & gyro pair but got '{accel}' and '{gyro}'")
+        def load_single_loader(loader):
+            return loader.load_data()
 
-                accel_data = pd.read_csv(os.path.join(self.datafolder, folder, accel))
-                gyro_data = pd.read_csv(os.path.join(self.datafolder, folder, gyro))
-                
-                if accel_data.empty or gyro_data.empty is None:
-                    raise ValueError(f"Data is empty")
+        with ThreadPoolExecutor() as executor:
+            data_frames = list(executor.map(load_single_loader, self.data_loaders))
 
-                accel_data.rename(columns={'accel_time_list':'time'}, inplace=True)
-                gyro_data.rename(columns={'gyro_time_list':'time'}, inplace=True)
-                merged = pd.merge(how='outer', on='time', left=accel_data, right=gyro_data)
-                merged['filename'] = folder + '/' + accel[0:7]
-                df = pd.concat([df, merged])
+        
+        # Combine all loaded data
+        df = pd.concat(data_frames)
 
+        # Common operations for all datasets
+        df['start_time'] = pd.to_datetime(df['start_time'], unit='s')
+        df['end_time'] = pd.to_datetime(df['end_time'], unit='s')
+        df['time'] = pd.to_datetime(df['time'], unit='s')
         return df
     
+    def fix_multiple_periods(self, value):
+        """Fix values with multiple periods (e.g., '31.203.125' -> '31.203125')"""
+        if isinstance(value, str):
+            value = re.sub(r'(\d+)\.(\d+)\.(\d+)', r'\1\.\2\3', value)
+        return value
+
     def pre_process(self, df: pd.DataFrame):
-        """Pre-processes data: resample to 40Hz and scales sensor data"""
+        """Pre-processes data: resample to 50Hz and scales sensor data"""
+        
+        uma_df = df[df['filename'].str.contains('UMA', na=False)]
+        up_df = df[~df['filename'].str.contains('UMA|U', na=False)]
+        weda_df = df[df['filename'].str.contains(r'U\d{2}_R\d{2}', na=False, regex=True)]
+        print(weda_df)
+
+        columns_to_scale = ['accel_x_list', 'accel_y_list', 'accel_z_list',
+                            'gyro_x_list', 'gyro_y_list', 'gyro_z_list']
+        
+        for col in columns_to_scale:
+            # Fix multiple periods in string values
+            uma_df[col] = uma_df[col].apply(self.fix_multiple_periods)
+            weda_df[col] = weda_df[col].apply(self.fix_multiple_periods)
+            up_df[col] = up_df[col].apply(self.fix_multiple_periods)
+
+            # Convert to numeric, replacing errors with NaN
+            uma_df[col] = pd.to_numeric(uma_df[col], errors='coerce')
+            weda_df[col] = pd.to_numeric(weda_df[col], errors='coerce')
+            up_df[col] = pd.to_numeric(up_df[col], errors='coerce')
+
+        scaler_uma = StandardScaler()
+        scaler_non_uma = StandardScaler()
+        scaler_up = StandardScaler()
+
+        uma_df[columns_to_scale] = scaler_uma.fit_transform(uma_df[columns_to_scale])
+        weda_df[columns_to_scale] = scaler_non_uma.fit_transform(weda_df[columns_to_scale])
+        up_df[columns_to_scale] = scaler_up.fit_transform(up_df[columns_to_scale])
+        
+        df = pd.concat([uma_df, weda_df, up_df])
+
         grouped = df.groupby('filename')
         resampled_df = []
 
         for _, group in grouped:
             group_resampled = self._resample_data(group)
             resampled_df.append(group_resampled)
+        
 
         df_resampled = pd.concat(resampled_df)
-
-        #save to preprocessed folder
-        os.makedirs('preprocessed', exist_ok=True)
-        df_resampled.to_csv(os.path.join('preprocessed', f'preprocessed_w{self.window_size}_o{self.overlap}.csv'), index=False)
+        df_resampled.dropna(inplace=True)
         return df_resampled
+    
 
     def _resample_data(self, group: pd.DataFrame):
-        """Resample the data to 40Hz (25ms interval) while handling duplicates and non-numeric columns."""
-
-        group['time'] = pd.to_datetime(group['time'], unit='s')  
+        """Resample the data to 50Hz (20ms interval) while handling duplicates and non-numeric columns.
+        Also aligns the time to start at 00:00.000.
+        """  
         group = group.drop_duplicates(subset=['time'])
         group.set_index('time', inplace=True)
+
+        # Snap timestamps to the nearest 20ms
+        group.index = group.index.round('20ms')
+        
+        # Drop duplicate timestamps
+        group = group[~group.index.duplicated(keep='first')]
+
+        # Drop the non-numeric column 'filename'
         numeric_group = group.drop(columns=['filename'])
-        numeric_resampled = numeric_group.resample('20ms').interpolate(method='linear')
-        numeric_resampled['filename'] = group['filename'].iloc[0]
-        return numeric_resampled.reset_index()
+         # Align start time to nearest 20ms
+        new_start_time = numeric_group.index.min().floor('20ms')  
+        new_time_index = pd.date_range(start=new_start_time, 
+                                    end=numeric_group.index.max(), 
+                                   freq='20ms')
+        
+        numeric_resampled = numeric_group.reindex(new_time_index)
+        interpolated = numeric_resampled.interpolate(method='linear').bfill().ffill()
+        interpolated.reset_index(inplace=True)
+        interpolated.rename(columns={'index': 'time'}, inplace=True)
+        interpolated['filename'] = group['filename'].iloc[0]
+        return interpolated
 
 
-    
     def extract_features(self, df: pd.DataFrame):
         """Applies sliding window and extracts statistical features for each filename"""
         window_size = self.window_size
         step_size = window_size - self.overlap
-        fall_dict = self._create_fall_dict()  # Assuming this is a dictionary with filenames and their fall start/end times
         grouped = df.groupby('filename')
         features = []
-        columns_to_use = ['gyro_x_list', 'gyro_y_list', 'gyro_z_list', 
-                        'accel_x_list', 'accel_y_list', 'accel_z_list']
 
-        for filename, group in grouped:
-            # Get fall start and end times for the current filename
-            fall_start, fall_end = fall_dict.get(filename, (None, None))
+        with ProcessPoolExecutor() as executor:
+            futures = []
+            for filename, group in grouped:
+                for i in range(0, len(group) - window_size + 1, step_size):
+                    window = group.iloc[i:i + window_size]
+                    if not (window['start_time'].isna().any() or window['end_time'].isna().any()):
+                        futures.append(executor.submit(FallDetector.process_window, window, filename, window_size))
 
-            # Apply sliding window for each group
-            for i in range(0, len(group) - window_size + 1, step_size):
-                window = group.iloc[i:i + window_size]
-                feature_dict = {
-                    'is_fall': 1 if self.is_within_fall(fall_start, fall_end, window) else 0,
-                    'filename': filename,
-                    'time_start': window['time'].iloc[0],
-                    'time_end': window['time'].iloc[-1]
-                }
-
-                for col in columns_to_use:
-                    feature_dict[f'{col}_mean'] = window[col].mean()
-                    feature_dict[f'{col}_std'] = window[col].std()
-                    feature_dict[f'{col}_min'] = window[col].min()
-                    feature_dict[f'{col}_max'] = window[col].max()
-                    feature_dict[f'{col}_median'] = window[col].median()
-                    feature_dict[f'{col}_iqr'] = window[col].quantile(0.75) - window[col].quantile(0.25)
-                    feature_dict[f'{col}_energy'] = np.sum(window[col]**2)
-                    feature_dict[f'{col}_rms'] = np.sqrt(np.mean(window[col]**2)) 
-                    sma = np.sum(np.abs(window[col])) / window_size  
-                    feature_dict[f'{col}_sma'] = sma
-              
-                # Calculate Roll and Pitch using Sensor Fusion (Complementary Filter)
-                accel_x = window['accel_x_list'].values
-                accel_y = window['accel_y_list'].values
-                accel_z = window['accel_z_list'].values
-                gyro_x = window['gyro_x_list'].values
-                gyro_y = window['gyro_y_list'].values
-                gyro_z = window['gyro_z_list'].values
-                time_diff = 0.02  # Assuming 50Hz sampling rate
-                
-                roll_accel = np.arctan2(accel_y, np.sqrt(accel_x**2 + accel_z**2)) * (180.0 / np.pi)
-                pitch_accel = np.arctan2(-accel_x, np.sqrt(accel_y**2 + accel_z**2)) * (180.0 / np.pi)
-                
-                roll_gyro = np.cumsum(gyro_x * time_diff)
-                pitch_gyro = np.cumsum(gyro_y * time_diff)
-                yaw_gyro = np.cumsum(gyro_z * time_diff)
-                
-                roll_fused = self.alpha * (roll_gyro) + (1 - self.alpha) * roll_accel
-                pitch_fused = self.alpha * (pitch_gyro) + (1 - self.alpha) * pitch_accel
-                
-                feature_dict['roll_mean'] = roll_fused.mean()
-                feature_dict['roll_std'] = roll_fused.std()
-                feature_dict['pitch_mean'] = pitch_fused.mean()
-                feature_dict['pitch_std'] = pitch_fused.std()
-                feature_dict['yaw_mean'] = yaw_gyro.mean()
-                feature_dict['yaw_std'] = yaw_gyro.std()
-
-                # Compute accel magnitude
-                accel_magnitude = np.sqrt(window['accel_x_list']**2 + window['accel_y_list']**2 + window['accel_z_list']**2)
-                feature_dict['accel_magnitude_mean'] = accel_magnitude.mean()
-                feature_dict['accel_magnitude_std'] = accel_magnitude.std()
-                feature_dict['accel_magnitude_min'] = accel_magnitude.min()
-                feature_dict['accel_magnitude_max'] = accel_magnitude.max()
-                feature_dict['accel_magnitude_median'] = accel_magnitude.median()
-                feature_dict['accel_magnitude_iqr'] = accel_magnitude.quantile(0.75) - accel_magnitude.quantile(0.25)
-                feature_dict['accel_magnitude_energy'] = np.sum(accel_magnitude**2)
-                feature_dict['accel_magnitude_rms'] = np.sqrt(np.mean(accel_magnitude**2))
-                feature_dict['accel_magnitude_sma'] = np.sum(np.abs(accel_magnitude)) / window_size
-                            
-                features.append(feature_dict)
+            for future in futures:
+                features.append(future.result())
 
         features_df = pd.DataFrame(features)
-        # Save to features folder
         os.makedirs('features', exist_ok=True)
         features_df.to_csv(self.get_file_path(), index=False)
+        print(features_df)
         return features_df
+    
+    @staticmethod
+    def process_window(window, filename, window_size):
+            feature_dict = {
+                'filename': filename,
+                'start_time': window['time'].iloc[0],
+                'end_time': window['time'].iloc[-1],
+                'is_fall': 1 if ((window['time'] >= window['start_time']) & 
+                                (window['time'] <= window['end_time'])).sum() / window_size >= 0.5 else 0
+            }
+
+            columns_to_use = ['gyro_x_list', 'gyro_y_list', 'gyro_z_list', 
+                        'accel_x_list', 'accel_y_list', 'accel_z_list']
+
+            for col in columns_to_use:
+                col_data = window[col]
+                feature_dict[f'{col}_mean'] = col_data.mean()
+                feature_dict[f'{col}_std'] = col_data.std()
+                feature_dict[f'{col}_min'] = col_data.min()
+                feature_dict[f'{col}_max'] = col_data.max()
+                feature_dict[f'{col}_median'] = col_data.median()
+                feature_dict[f'{col}_iqr'] = col_data.quantile(0.75) - col_data.quantile(0.25)
+                feature_dict[f'{col}_energy'] = np.sum(col_data**2)
+                feature_dict[f'{col}_rms'] = np.sqrt(np.mean(col_data**2))
+                feature_dict[f'{col}_sma'] = np.sum(np.abs(col_data)) / window_size
+                feature_dict[f'{col}_skew'] = col_data.skew()
+                feature_dict[f'{col}_kurtosis'] = col_data.kurtosis()
+                feature_dict[f'{col}_absum'] = np.sum(np.abs(col_data))
+                feature_dict[f'{col}_DDM'] = col_data.max() - col_data.min()
+                feature_dict[f'{col}_GMM'] = np.sqrt((col_data.max() - col_data.min())**2 + 
+                                                    (np.argmax(col_data) - np.argmin(col_data))**2)
+                feature_dict[f'{col}_MD'] = max(np.diff(col_data))
+
+            accel_magnitude = np.sqrt(window['accel_x_list']**2 + window['accel_y_list']**2 + window['accel_z_list']**2)
+            gyro_magnitude = np.sqrt(window['gyro_x_list']**2 + window['gyro_y_list']**2 + window['gyro_z_list']**2)
+
+            for mag, prefix in zip([accel_magnitude, gyro_magnitude], ['accel_magnitude', 'gyro_magnitude']):
+                feature_dict[f'{prefix}_mean'] = mag.mean()
+                feature_dict[f'{prefix}_std'] = mag.std()
+                feature_dict[f'{prefix}_min'] = mag.min()
+                feature_dict[f'{prefix}_max'] = mag.max()
+                feature_dict[f'{prefix}_median'] = mag.median()
+                feature_dict[f'{prefix}_iqr'] = mag.quantile(0.75) - mag.quantile(0.25)
+                feature_dict[f'{prefix}_energy'] = np.sum(mag**2)
+                feature_dict[f'{prefix}_rms'] = np.sqrt(np.mean(mag**2))
+                feature_dict[f'{prefix}_sma'] = np.sum(np.abs(mag)) / window_size
+
+            return feature_dict
     
     def get_file_path(self) -> StrPath:
         """Returns the path to the features file"""
         os.makedirs('features', exist_ok=True)
         return os.path.join('features', f'features_w{self.window_size}_o{self.overlap}.csv')
     
-    def is_within_fall(self, fall_start, fall_end, window) -> bool:
-        """Check if a fall event happens within the given window"""
-        if fall_start is None or fall_end is None:
-            return False  
-        
-        window_start_time = window['time'].iloc[0].timestamp()
-        window_end_time = window['time'].iloc[-1].timestamp()
-        fall_start = float(fall_start)
-        fall_end = float(fall_end)
-
-        return not (window_end_time < fall_start or window_start_time > fall_end)
-    
-    def _create_fall_dict(self):
-        """Creates a dictionary mapping filenames to their start and end times for falls"""
-        fall_dict = {}
-        for _, row in self.fall_timestamps.iterrows():
-            filename = row['filename']
-            fall_dict[filename] = (float(row['start_time']), float(row['end_time']))
-        
-        return fall_dict
