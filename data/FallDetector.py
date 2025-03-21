@@ -45,33 +45,37 @@ class FallDetector:
 
     def pre_process(self, df: pd.DataFrame):
         """Pre-processes data: resample to 50Hz and scales sensor data"""
-        #Group my UMA and 50Mhz data
-        #uma_df = df[df['filename'].str.contains('UMA', na=False)]
-        non_uma_df = df[~df['filename'].str.contains('UMA', na=False)]
-
-        scaler_uma = StandardScaler()
-        scaler_non_uma = StandardScaler()
+        
+        uma_df = df[df['filename'].str.contains('UMA', na=False)]
+        up_df = df[~df['filename'].str.contains('UMA|U', na=False)]
+        weda_df = df[df['filename'].str.contains(r'U\d{2}_R\d{2}', na=False, regex=True)]
+        print(weda_df)
 
         columns_to_scale = ['accel_x_list', 'accel_y_list', 'accel_z_list',
                             'gyro_x_list', 'gyro_y_list', 'gyro_z_list']
         
         for col in columns_to_scale:
             # Fix multiple periods in string values
-            #uma_df[col] = uma_df[col].apply(self.fix_multiple_periods)
-            non_uma_df[col] = non_uma_df[col].apply(self.fix_multiple_periods)
+            uma_df[col] = uma_df[col].apply(self.fix_multiple_periods)
+            weda_df[col] = weda_df[col].apply(self.fix_multiple_periods)
+            up_df[col] = up_df[col].apply(self.fix_multiple_periods)
 
             # Convert to numeric, replacing errors with NaN
-            #uma_df[col] = pd.to_numeric(uma_df[col], errors='coerce')
-            non_uma_df[col] = pd.to_numeric(non_uma_df[col], errors='coerce')
+            uma_df[col] = pd.to_numeric(uma_df[col], errors='coerce')
+            weda_df[col] = pd.to_numeric(weda_df[col], errors='coerce')
+            up_df[col] = pd.to_numeric(up_df[col], errors='coerce')
 
+        scaler_uma = StandardScaler()
+        scaler_non_uma = StandardScaler()
+        scaler_up = StandardScaler()
 
-        #uma_df[columns_to_scale] = scaler_uma.fit_transform(uma_df[columns_to_scale])
-        non_uma_df[columns_to_scale] = scaler_non_uma.fit_transform(non_uma_df[columns_to_scale])
+        uma_df[columns_to_scale] = scaler_uma.fit_transform(uma_df[columns_to_scale])
+        weda_df[columns_to_scale] = scaler_non_uma.fit_transform(weda_df[columns_to_scale])
+        up_df[columns_to_scale] = scaler_up.fit_transform(up_df[columns_to_scale])
         
-        #df = pd.concat([uma_df, non_uma_df])
+        df = pd.concat([uma_df, weda_df, up_df])
 
-        #TODO GO BACK TO DF 
-        grouped = non_uma_df.groupby('filename')
+        grouped = df.groupby('filename')
         resampled_df = []
 
         for _, group in grouped:
@@ -81,7 +85,6 @@ class FallDetector:
 
         df_resampled = pd.concat(resampled_df)
         df_resampled.dropna(inplace=True)
-        
         return df_resampled
     
 
@@ -94,6 +97,9 @@ class FallDetector:
 
         # Snap timestamps to the nearest 20ms
         group.index = group.index.round('20ms')
+        
+        # Drop duplicate timestamps
+        group = group[~group.index.duplicated(keep='first')]
 
         # Drop the non-numeric column 'filename'
         numeric_group = group.drop(columns=['filename'])
@@ -103,11 +109,12 @@ class FallDetector:
                                     end=numeric_group.index.max(), 
                                    freq='20ms')
         
-        numeric_resampled = numeric_group.reindex(new_time_index).interpolate(method='linear').bfill().ffill()
-        numeric_resampled.reset_index(inplace=True)
-        numeric_resampled.rename(columns={'index': 'time'}, inplace=True)
-        numeric_resampled['filename'] = group['filename'].iloc[0]
-        return numeric_resampled
+        numeric_resampled = numeric_group.reindex(new_time_index)
+        interpolated = numeric_resampled.interpolate(method='linear').bfill().ffill()
+        interpolated.reset_index(inplace=True)
+        interpolated.rename(columns={'index': 'time'}, inplace=True)
+        interpolated['filename'] = group['filename'].iloc[0]
+        return interpolated
 
 
     def extract_features(self, df: pd.DataFrame):

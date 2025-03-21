@@ -29,11 +29,10 @@ class ModelTester:
         for config in self.configs:
             window_size, overlap = config
             print(f"Testing configuration: window_size={window_size}, overlap={overlap}")
-            #TODO ADD THESE BACK
             uma_loader = UmaFallLoader(os.path.join(os.getcwd(), 'UMAFall'), 'UMA_fall_timestamps.csv')
             weda_loader = WedaFallLoader(os.path.join(os.getcwd(), 'WEDAFall'), 'WEDA_fall_timestamps.csv')
             up_fall_loader = UpFallLoader(os.path.join(os.getcwd(), 'UpFall'), 'UP_fall_timestamps.csv')
-            fall_detector = FallDetector(window_size, overlap, [up_fall_loader])
+            fall_detector = FallDetector(window_size, overlap, [uma_loader, weda_loader, up_fall_loader])
             features_file = fall_detector.get_file_path()
 
             if os.path.exists(features_file):
