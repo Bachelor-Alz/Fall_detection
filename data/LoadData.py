@@ -33,10 +33,6 @@ class UpFallLoader(BaseLoader):
             up_df['filename'] = file  # Add a column for the filename
             df = pd.concat([df, up_df], ignore_index=True)
             fall_timestamps.append((file, 0,0))
-
-        #Save fall_start and fall_end timestamps to a csv file
-        fall_timestamps_df = pd.DataFrame(fall_timestamps, columns=['filename', 'fall_start', 'fall_end'])
-        fall_timestamps_df.to_csv('UP_fall_timestamps.csv', index=False)
         
         # Load ADL data
         for file in os.listdir(adls):
@@ -47,11 +43,10 @@ class UpFallLoader(BaseLoader):
 
         # Ensure 'time' column is in datetime format
         df['time'] = pd.to_datetime(df['time'])
-        df['time'] = df.groupby('filename')['time'].transform(lambda x: (x - x.iloc[0]).dt.total_seconds()).astype(float)
-
+        df['time'] = df.groupby('filename')['time'].transform(lambda x: (x - x.min()).dt.total_seconds()).astype(float)
+        
         # Merge with timestamps
         df = pd.merge(df, self.timestamps, how='left', left_on='filename', right_on='filename')
-        print(df)
         return df
 
 

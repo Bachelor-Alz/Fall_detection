@@ -171,7 +171,7 @@ class ModelTester:
 if __name__ == '__main__':
     # Example usage
         
-    tester = ModelTester(configs=[(100, 45)
+    tester = ModelTester(configs=[(45, 40)
                                 ], n_kfolds=5)
     tester.run_tests()
     results = tester.get_results()

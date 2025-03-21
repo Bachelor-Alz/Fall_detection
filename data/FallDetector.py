@@ -71,9 +71,7 @@ class FallDetector:
         #df = pd.concat([uma_df, non_uma_df])
 
         #TODO GO BACK TO DF 
-        df = self._remove_outliers_iqr(non_uma_df)
-        print(df)
-        grouped = df.groupby('filename')
+        grouped = non_uma_df.groupby('filename')
         resampled_df = []
 
         for _, group in grouped:
@@ -82,22 +80,10 @@ class FallDetector:
         
 
         df_resampled = pd.concat(resampled_df)
-        print(df_resampled)
         df_resampled.dropna(inplace=True)
         
         return df_resampled
     
-
-    def _remove_outliers_iqr(self, df: pd.DataFrame):
-        # Drop 'filename' column for IQR calculation
-        df_numeric = df.drop(columns='filename')
-        Q1 = df_numeric.quantile(0.25)
-        Q3 = df_numeric.quantile(0.75)
-        IQR = Q3 - Q1
-
-        # Filter out rows with outliers
-        filtered_df = df[~((df_numeric < (Q1 - 1.5 * IQR)) | (df_numeric > (Q3 + 1.5 * IQR))).any(axis=1)]
-        return filtered_df
 
     def _resample_data(self, group: pd.DataFrame):
         """Resample the data to 50Hz (20ms interval) while handling duplicates and non-numeric columns.
@@ -111,22 +97,17 @@ class FallDetector:
 
         # Drop the non-numeric column 'filename'
         numeric_group = group.drop(columns=['filename'])
-
-        # Resample the numeric data to 20ms intervals
-        numeric_resampled = numeric_group.resample('20ms')
-
-        # Interpolate missing values using linear interpolation, then backfill and forward fill
-        interpolated = numeric_resampled.interpolate(method='linear').bfill().ffill()
-
-        # Reset the index and rename it back to 'time'
-        interpolated.reset_index(inplace=True)
-        interpolated.rename(columns={'index': 'time'}, inplace=True)
-
-        # Add the 'filename' column back
-        interpolated['filename'] = group['filename'].iloc[0]
-
-        # Return the final interpolated DataFrame
-        return interpolated
+         # Align start time to nearest 20ms
+        new_start_time = numeric_group.index.min().floor('20ms')  
+        new_time_index = pd.date_range(start=new_start_time, 
+                                    end=numeric_group.index.max(), 
+                                   freq='20ms')
+        
+        numeric_resampled = numeric_group.reindex(new_time_index).interpolate(method='linear').bfill().ffill()
+        numeric_resampled.reset_index(inplace=True)
+        numeric_resampled.rename(columns={'index': 'time'}, inplace=True)
+        numeric_resampled['filename'] = group['filename'].iloc[0]
+        return numeric_resampled
 
 
     def extract_features(self, df: pd.DataFrame):
