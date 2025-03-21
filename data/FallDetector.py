@@ -20,7 +20,7 @@ class FallDetector:
 
     def load_data(self):
         """Loads data from all data loaders"""
-
+        print("Loading data")
         def load_single_loader(loader):
             return loader.load_data()
 
@@ -30,6 +30,7 @@ class FallDetector:
         
         # Combine all loaded data
         df = pd.concat(data_frames)
+        print("Loaded data")
 
         # Common operations for all datasets
         df['start_time'] = pd.to_datetime(df['start_time'], unit='s')
@@ -45,33 +46,30 @@ class FallDetector:
 
     def pre_process(self, df: pd.DataFrame):
         """Pre-processes data: resample to 50Hz and scales sensor data"""
-        
+        print("Pre-processing data")
         uma_df = df[df['filename'].str.contains('UMA', na=False)]
         up_df = df[~df['filename'].str.contains('UMA|U', na=False)]
         weda_df = df[df['filename'].str.contains(r'U\d{2}_R\d{2}', na=False, regex=True)]
-        print(weda_df)
 
         columns_to_scale = ['accel_x_list', 'accel_y_list', 'accel_z_list',
                             'gyro_x_list', 'gyro_y_list', 'gyro_z_list']
         
         for col in columns_to_scale:
-            # Fix multiple periods in string values
-            uma_df[col] = uma_df[col].apply(self.fix_multiple_periods)
-            weda_df[col] = weda_df[col].apply(self.fix_multiple_periods)
-            up_df[col] = up_df[col].apply(self.fix_multiple_periods)
+            uma_df.loc[:, col] = uma_df[col].apply(self.fix_multiple_periods)
+            weda_df.loc[:, col] = weda_df[col].apply(self.fix_multiple_periods)
+            up_df.loc[:, col] = up_df[col].apply(self.fix_multiple_periods)
 
-            # Convert to numeric, replacing errors with NaN
-            uma_df[col] = pd.to_numeric(uma_df[col], errors='coerce')
-            weda_df[col] = pd.to_numeric(weda_df[col], errors='coerce')
-            up_df[col] = pd.to_numeric(up_df[col], errors='coerce')
+            uma_df.loc[:, col] = pd.to_numeric(uma_df[col], errors='coerce')
+            weda_df.loc[:, col] = pd.to_numeric(weda_df[col], errors='coerce')
+            up_df.loc[:, col] = pd.to_numeric(up_df[col], errors='coerce')
 
         scaler_uma = StandardScaler()
         scaler_non_uma = StandardScaler()
         scaler_up = StandardScaler()
 
-        uma_df[columns_to_scale] = scaler_uma.fit_transform(uma_df[columns_to_scale])
-        weda_df[columns_to_scale] = scaler_non_uma.fit_transform(weda_df[columns_to_scale])
-        up_df[columns_to_scale] = scaler_up.fit_transform(up_df[columns_to_scale])
+        uma_df.loc[:, columns_to_scale] = scaler_uma.fit_transform(uma_df[columns_to_scale])
+        weda_df.loc[:, columns_to_scale] = scaler_non_uma.fit_transform(weda_df[columns_to_scale])
+        up_df.loc[:, columns_to_scale] = scaler_up.fit_transform(up_df[columns_to_scale])
         
         df = pd.concat([uma_df, weda_df, up_df])
 
@@ -81,10 +79,16 @@ class FallDetector:
         for _, group in grouped:
             group_resampled = self._resample_data(group)
             resampled_df.append(group_resampled)
+
+
         
 
         df_resampled = pd.concat(resampled_df)
         df_resampled.dropna(inplace=True)
+        scalar = StandardScaler()
+
+        df_resampled.loc[:, columns_to_scale] = scalar.fit_transform(df_resampled[columns_to_scale])
+        print("Pre-processed data")
         return df_resampled
     
 
@@ -138,7 +142,7 @@ class FallDetector:
         features_df = pd.DataFrame(features)
         os.makedirs('features', exist_ok=True)
         features_df.to_csv(self.get_file_path(), index=False)
-        print(features_df)
+        print("Extracted features")
         return features_df
     
     @staticmethod
