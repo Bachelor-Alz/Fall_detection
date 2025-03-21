@@ -27,6 +27,7 @@ class FallDetector:
         with ThreadPoolExecutor() as executor:
             data_frames = list(executor.map(load_single_loader, self.data_loaders))
 
+        
         # Combine all loaded data
         df = pd.concat(data_frames)
 
@@ -38,17 +39,14 @@ class FallDetector:
     
     def fix_multiple_periods(self, value):
         """Fix values with multiple periods (e.g., '31.203.125' -> '31.203125')"""
-        # Match patterns like numbers with multiple dots (e.g., '31.203.125')
         if isinstance(value, str):
-            # Replace multiple dots with a single dot if necessary
             value = re.sub(r'(\d+)\.(\d+)\.(\d+)', r'\1\.\2\3', value)
-            # You can add more patterns depending on the kind of data you're encountering
         return value
 
     def pre_process(self, df: pd.DataFrame):
         """Pre-processes data: resample to 50Hz and scales sensor data"""
         #Group my UMA and 50Mhz data
-        uma_df = df[df['filename'].str.contains('UMA', na=False)]
+        #uma_df = df[df['filename'].str.contains('UMA', na=False)]
         non_uma_df = df[~df['filename'].str.contains('UMA', na=False)]
 
         scaler_uma = StandardScaler()
@@ -59,28 +57,34 @@ class FallDetector:
         
         for col in columns_to_scale:
             # Fix multiple periods in string values
-            uma_df[col] = uma_df[col].apply(self.fix_multiple_periods)
+            #uma_df[col] = uma_df[col].apply(self.fix_multiple_periods)
             non_uma_df[col] = non_uma_df[col].apply(self.fix_multiple_periods)
 
             # Convert to numeric, replacing errors with NaN
-            uma_df[col] = pd.to_numeric(uma_df[col], errors='coerce')
+            #uma_df[col] = pd.to_numeric(uma_df[col], errors='coerce')
             non_uma_df[col] = pd.to_numeric(non_uma_df[col], errors='coerce')
 
 
-        uma_df[columns_to_scale] = scaler_uma.fit_transform(uma_df[columns_to_scale])
+        #uma_df[columns_to_scale] = scaler_uma.fit_transform(uma_df[columns_to_scale])
         non_uma_df[columns_to_scale] = scaler_non_uma.fit_transform(non_uma_df[columns_to_scale])
-        df = pd.concat([uma_df, non_uma_df])
+        
+        #df = pd.concat([uma_df, non_uma_df])
 
-        df = self._remove_outliers_iqr(df)
+        #TODO GO BACK TO DF 
+        df = self._remove_outliers_iqr(non_uma_df)
+        print(df)
         grouped = df.groupby('filename')
         resampled_df = []
 
         for _, group in grouped:
             group_resampled = self._resample_data(group)
             resampled_df.append(group_resampled)
+        
 
         df_resampled = pd.concat(resampled_df)
+        print(df_resampled)
         df_resampled.dropna(inplace=True)
+        
         return df_resampled
     
 
@@ -95,26 +99,35 @@ class FallDetector:
         filtered_df = df[~((df_numeric < (Q1 - 1.5 * IQR)) | (df_numeric > (Q3 + 1.5 * IQR))).any(axis=1)]
         return filtered_df
 
-
     def _resample_data(self, group: pd.DataFrame):
         """Resample the data to 50Hz (20ms interval) while handling duplicates and non-numeric columns.
         Also aligns the time to start at 00:00.000.
         """  
         group = group.drop_duplicates(subset=['time'])
         group.set_index('time', inplace=True)
+
+        # Snap timestamps to the nearest 20ms
+        group.index = group.index.round('20ms')
+
+        # Drop the non-numeric column 'filename'
         numeric_group = group.drop(columns=['filename'])
 
-        # Align start time to nearest 20ms
-        new_start_time = numeric_group.index.min().floor('20ms')  
-        new_time_index = pd.date_range(start=new_start_time, 
-                                    end=numeric_group.index.max(), 
-                                    freq='20ms')
+        # Resample the numeric data to 20ms intervals
+        numeric_resampled = numeric_group.resample('20ms')
 
-        numeric_resampled = numeric_group.reindex(new_time_index).interpolate(method='linear').bfill().ffill()
-        numeric_resampled.reset_index(inplace=True)
-        numeric_resampled.rename(columns={'index': 'time'}, inplace=True)
-        numeric_resampled['filename'] = group['filename'].iloc[0]
-        return numeric_resampled
+        # Interpolate missing values using linear interpolation, then backfill and forward fill
+        interpolated = numeric_resampled.interpolate(method='linear').bfill().ffill()
+
+        # Reset the index and rename it back to 'time'
+        interpolated.reset_index(inplace=True)
+        interpolated.rename(columns={'index': 'time'}, inplace=True)
+
+        # Add the 'filename' column back
+        interpolated['filename'] = group['filename'].iloc[0]
+
+        # Return the final interpolated DataFrame
+        return interpolated
+
 
     def extract_features(self, df: pd.DataFrame):
         """Applies sliding window and extracts statistical features for each filename"""
@@ -137,6 +150,7 @@ class FallDetector:
         features_df = pd.DataFrame(features)
         os.makedirs('features', exist_ok=True)
         features_df.to_csv(self.get_file_path(), index=False)
+        print(features_df)
         return features_df
     
     @staticmethod

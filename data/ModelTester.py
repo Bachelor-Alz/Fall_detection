@@ -8,7 +8,7 @@ from imblearn.over_sampling import SMOTE
 from sklearn.metrics import balanced_accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
 from joblib import Parallel, delayed
 from FallDetector import FallDetector
-from LoadData import UmaFallLoader, WedaFallLoader
+from LoadData import UmaFallLoader, UpFallLoader, WedaFallLoader
 import pandas as pd
 import numpy as np
 import os
@@ -29,9 +29,11 @@ class ModelTester:
         for config in self.configs:
             window_size, overlap = config
             print(f"Testing configuration: window_size={window_size}, overlap={overlap}")
+            #TODO ADD THESE BACK
             uma_loader = UmaFallLoader(os.path.join(os.getcwd(), 'UMAFall'), 'UMA_fall_timestamps.csv')
             weda_loader = WedaFallLoader(os.path.join(os.getcwd(), 'WEDAFall'), 'WEDA_fall_timestamps.csv')
-            fall_detector = FallDetector(window_size, overlap, [uma_loader, weda_loader])
+            up_fall_loader = UpFallLoader(os.path.join(os.getcwd(), 'UpFall'), 'UP_fall_timestamps.csv')
+            fall_detector = FallDetector(window_size, overlap, [up_fall_loader])
             features_file = fall_detector.get_file_path()
 
             if os.path.exists(features_file):
@@ -131,21 +133,18 @@ class ModelTester:
             return self.metrics
         
     def visualize_smote(self, features_file_path): 
-
-        #Load data
+        # Load data
         df = pd.read_csv(features_file_path)
         X = df.drop(columns=['is_fall', 'filename', 'start_time', 'end_time'])
         y = df['is_fall'].reset_index(drop=True)
-
-        
 
         # Create imbalanced data
         X, y = make_classification(n_classes=2, weights=[0.9, 0.1], n_features=10, random_state=42)
         scaler = StandardScaler()
         X_scaled = scaler.fit_transform(X)
 
-        # Apply PCA to reduce to 2D for visualization
-        pca = PCA(n_components=2)
+        # Apply PCA to reduce to 3D for visualization
+        pca = PCA(n_components=3)
         X_pca = pca.fit_transform(X_scaled)
 
         # Apply SMOTE
@@ -155,28 +154,30 @@ class ModelTester:
         # Apply PCA again to visualize synthetic vs. original
         X_resampled_pca = pca.transform(X_resampled)
 
-        # Plot original vs. synthetic data
-        plt.figure(figsize=(8,6))
-        plt.scatter(X_pca[y == 0, 0], X_pca[y == 0, 1], label="Majority Class (Original)", alpha=0.5)
-        plt.scatter(X_pca[y == 1, 0], X_pca[y == 1, 1], label="Minority Class (Original)", color='red', alpha=0.5)
-        plt.scatter(X_resampled_pca[len(y):, 0], X_resampled_pca[len(y):, 1], label="Synthetic Minority (SMOTE)", color='green', alpha=0.5)
+        # Plot original vs. synthetic data in 3D
+        fig = plt.figure(figsize=(10, 8))
+        ax = fig.add_subplot(111, projection='3d')
+        ax.scatter(X_pca[y == 0, 0], X_pca[y == 0, 1], X_pca[y == 0, 2], label="Majority Class (Original)", alpha=0.5)
+        ax.scatter(X_pca[y == 1, 0], X_pca[y == 1, 1], X_pca[y == 1, 2], label="Minority Class (Original)", color='red', alpha=0.5)
+        ax.scatter(X_resampled_pca[len(y):, 0], X_resampled_pca[len(y):, 1], X_resampled_pca[len(y):, 2], label="Synthetic Minority (SMOTE)", color='green', alpha=0.5)
 
-        plt.legend()
-        plt.xlabel("PCA Feature 1")
-        plt.ylabel("PCA Feature 2")
-        plt.title("SMOTE: Original vs. Synthetic Data Points")
+        ax.set_xlabel("PCA Feature 1")
+        ax.set_ylabel("PCA Feature 2")
+        ax.set_zlabel("PCA Feature 3")
+        ax.set_title("SMOTE: Original vs. Synthetic Data Points (3D)")
+        ax.legend()
         plt.show()
 
 if __name__ == '__main__':
     # Example usage
-    """     
-    tester = ModelTester(configs=[(45, 35)
+        
+    tester = ModelTester(configs=[(100, 45)
                                 ], n_kfolds=5)
     tester.run_tests()
     results = tester.get_results()
     print(results)
-     """
+    
 
 
-    ModelTester(configs=[(50, 40)], n_kfolds=5).visualize_smote(os.path.join(os.getcwd(), 'features', 'features_w50_o40.csv'))
+    #ModelTester(configs=[(50, 41)], n_kfolds=5).visualize_smote(os.path.join(os.getcwd(), 'features', 'features_w50_o40.csv'))
 

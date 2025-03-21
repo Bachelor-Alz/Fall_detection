@@ -13,6 +13,54 @@ class BaseLoader(ABC):
         pass
 
 
+class UpFallLoader(BaseLoader):
+    """
+    Loader for the Up Fall dataset
+    """
+    def __init__(self, folder_path: str, timestamp_file: str):
+        super().__init__(folder_path, timestamp_file)
+
+    def load_data(self):
+        df = pd.DataFrame()
+        falls = os.path.join(self.datafolder, 'Falls')
+        adls = os.path.join(self.datafolder, 'ADL')
+        fall_timestamps = []
+        
+        # Load falls data
+        for file in os.listdir(falls):
+            file_path = os.path.join(falls, file)
+            up_df = pd.read_csv(file_path)
+            up_df['filename'] = file  # Add a column for the filename
+            df = pd.concat([df, up_df], ignore_index=True)
+            fall_timestamps.append((file, 0,0))
+
+        #Save fall_start and fall_end timestamps to a csv file
+        fall_timestamps_df = pd.DataFrame(fall_timestamps, columns=['filename', 'fall_start', 'fall_end'])
+        fall_timestamps_df.to_csv('UP_fall_timestamps.csv', index=False)
+        
+        # Load ADL data
+        for file in os.listdir(adls):
+            file_path = os.path.join(adls, file)
+            up_df = pd.read_csv(file_path)
+            up_df['filename'] = file  # Add a column for the filename
+            df = pd.concat([df, up_df], ignore_index=True)
+
+        # Ensure 'time' column is in datetime format
+        df['time'] = pd.to_datetime(df['time'])
+        df['time'] = df.groupby('filename')['time'].transform(lambda x: (x - x.iloc[0]).dt.total_seconds()).astype(float)
+
+        # Merge with timestamps
+        df = pd.merge(df, self.timestamps, how='left', left_on='filename', right_on='filename')
+        print(df)
+        return df
+
+
+
+
+
+
+
+
 class WedaFallLoader(BaseLoader):
     """
     Loader for the Weda Fall dataset
@@ -124,3 +172,4 @@ class UmaFallLoader(BaseLoader):
 
         return df
     
+
