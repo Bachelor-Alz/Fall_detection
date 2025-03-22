@@ -15,7 +15,7 @@ import os
 import datetime
 import pytz
 class ModelTester:
-    def __init__(self, configs, results_file="results.csv", n_features=50, n_kfolds=5, n_components=0.90):
+    def __init__(self, configs, results_file="results.csv", n_features=50, n_kfolds=5, n_components=0.80):
         """Initialize the tester with multiple configurations."""
         self.configs = configs  # List of configurations (window_size, overlap)
         self.results_file = results_file  # Path to store results
@@ -74,10 +74,10 @@ class ModelTester:
             y_train, y_test = y.iloc[train_index], y.iloc[test_index]
 
             # Apply SMOTE on PCA-transformed features
-            smote = SMOTE(random_state=42)
+            smote = SMOTE(random_state=42, k_neighbors=5)
             X_train_smote, y_train_smote = smote.fit_resample(X_train, y_train)
             
-            model = RandomForestClassifier(random_state=42, n_jobs=-1)
+            model = RandomForestClassifier(random_state=42, n_jobs=-1, class_weight='balanced')
             model.fit(X_train_smote, y_train_smote)  # Train on balanced dataset
             y_pred = model.predict(X_test)
 
@@ -147,7 +147,7 @@ class ModelTester:
         X_pca = pca.fit_transform(X_scaled)
 
         # Apply SMOTE
-        smote = SMOTE(random_state=42)
+        smote = SMOTE(random_state=42, k_neighbors=3)
         X_resampled, y_resampled = smote.fit_resample(X_scaled, y)
 
         # Apply PCA again to visualize synthetic vs. original
@@ -170,13 +170,14 @@ class ModelTester:
 if __name__ == '__main__':
     # Example usage
         
+
     tester = ModelTester(configs=[(45, 40)
                                 ], n_kfolds=5)
     tester.run_tests()
     results = tester.get_results()
-    print(results)
+    print(results) 
     
 
 
-    #ModelTester(configs=[(50, 41)], n_kfolds=5).visualize_smote(os.path.join(os.getcwd(), 'features', 'features_w50_o40.csv'))
+    #ModelTester(configs=[(50, 41)], n_kfolds=5).visualize_smote(os.path.join(os.getcwd(), 'features', 'features_w45_o40.csv'))
 
