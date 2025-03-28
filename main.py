@@ -7,7 +7,9 @@ import numpy as np
 from sklearn.preprocessing import StandardScaler
 from scipy.ndimage import gaussian_filter1d
 import httpx
+from fastapi import FastAPI, HTTPException
 import uvicorn
+
 
 model = joblib.load("fall_detection_model.joblib")
 pca = joblib.load("pca_transformation.joblib")
@@ -15,12 +17,12 @@ pca = joblib.load("pca_transformation.joblib")
 app = FastAPI()
 
 class IMUDataPoint(BaseModel):
-    accel_x: float
-    accel_y: float
-    accel_z: float
-    gyro_x: float
-    gyro_y: float
-    gyro_z: float
+    ax: float
+    ay: float
+    az: float
+    gx: float
+    gy: float
+    gz: float
 
 @app.post("/predict")
 async def predict(data: List[IMUDataPoint]):
@@ -29,12 +31,12 @@ async def predict(data: List[IMUDataPoint]):
 
     try:
         df = pd.DataFrame([{
-            'accel_x_list': point.accel_x,
-            'accel_y_list': point.accel_y,
-            'accel_z_list': point.accel_z,
-            'gyro_x_list': point.gyro_x,
-            'gyro_y_list': point.gyro_y,
-            'gyro_z_list': point.gyro_z
+            'accel_x_list': point.ax,
+            'accel_y_list': point.ay,
+            'accel_z_list': point.az,
+            'gyro_x_list': point.gx,
+            'gyro_y_list': point.gy,
+            'gyro_z_list': point.gz
         } for point in data])
 
         df = pre_process(df)
@@ -52,6 +54,7 @@ async def predict(data: List[IMUDataPoint]):
             response.raise_for_status() 
 
     except Exception as e:
+        print(e)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -119,8 +122,5 @@ def extract_features(df: pd.DataFrame):
 
     return pd.DataFrame(features)
 
-
-
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=9999)
-

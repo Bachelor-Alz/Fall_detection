@@ -33,13 +33,13 @@ python3 -m venv venv
 ## Running the project
 
 ```bash
-uvicorn main:app
+uvicorn main:app --port 9999
 ```
 
 for changes to be reflected immediatly use:
 
 ```bash
-uvicorn main:app --reload
+uvicorn main:app --reload --port 9999
 ```
 
 ## Swagger Documentation
