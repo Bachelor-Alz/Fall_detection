@@ -45,3 +45,17 @@ uvicorn main:app --reload
 ## Swagger Documentation
 
 Swagger documentation can be found at http://127.0.0.1:8000/docs
+
+## Docker
+
+You can build the API with the Dockerfile using the command:
+
+```bash
+docker build -t image-name .
+```
+
+After building the image you can run the app in a docker container using the command
+
+```bash
+docker run -d -p 9999:9999 image-name
+```

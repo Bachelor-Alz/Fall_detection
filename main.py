@@ -7,13 +7,12 @@ import numpy as np
 from sklearn.preprocessing import StandardScaler
 from scipy.ndimage import gaussian_filter1d
 import httpx
+import uvicorn
 
-# Load pre-trained model and PCA
 model = joblib.load("fall_detection_model.joblib")
 pca = joblib.load("pca_transformation.joblib")
 
 app = FastAPI()
-
 
 class IMUDataPoint(BaseModel):
     accel_x: float
@@ -120,4 +119,8 @@ def extract_features(df: pd.DataFrame):
 
     return pd.DataFrame(features)
 
+
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=9999)
 
