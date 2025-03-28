@@ -46,7 +46,7 @@ async def predict(data: List[IMUDataPoint]):
         # Send the result to a different API
         async with httpx.AsyncClient() as client:
             response = await client.post(
-                "http://localhost:5171/AI/compute",  
+                "http://healthdevice_app:5171/AI/compute",  
                 json=prediction_list
             )
             response.raise_for_status() 
