@@ -6,6 +6,7 @@ import pandas as pd
 import numpy as np
 from sklearn.preprocessing import StandardScaler
 from scipy.ndimage import gaussian_filter1d
+import httpx
 
 # Load pre-trained model and PCA
 model = joblib.load("fall_detection_model.joblib")
@@ -27,7 +28,6 @@ async def predict(data: List[IMUDataPoint]):
     if not data:
         raise HTTPException(status_code=400, detail="No IMU data provided.")
 
-
     try:
         df = pd.DataFrame([{
             'accel_x_list': point.accel_x,
@@ -43,7 +43,14 @@ async def predict(data: List[IMUDataPoint]):
         pca_features = pca.transform(features_df)
         prediction = model.predict(pca_features)
         prediction_list = prediction.tolist()
-        return prediction_list
+
+        # Send the result to a different API
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                "http://localhost:5171/AI/compute",  
+                json=prediction_list
+            )
+            response.raise_for_status() 
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
