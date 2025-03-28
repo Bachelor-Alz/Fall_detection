@@ -41,7 +41,7 @@ async def predict(data: List[IMUDataPoint]):
 
         df = pre_process(df)
         features_df = extract_features(df)
-        pca_features = pca.transform(features_df)
+        pca_features = pca.transform(features_df.values)
         prediction = model.predict(pca_features)
         prediction_list = prediction.tolist()
 
