@@ -24,8 +24,30 @@ class IMUDataPoint(BaseModel):
     gyro_y: float
     gyro_z: float
 
-class IMUBatch(BaseModel):
-    data: List[IMUDataPoint]
+@app.post("/predict")
+async def predict(data: List[IMUDataPoint]):
+    try:
+        df = pd.DataFrame([{
+            'accel_x_list': point.accel_x,
+            'accel_y_list': point.accel_y,
+            'accel_z_list': point.accel_z,
+            'gyro_x_list': point.gyro_x,
+            'gyro_y_list': point.gyro_y,
+            'gyro_z_list': point.gyro_z
+        } for point in data.data])
+
+        df = pre_process(df)
+        features_df = extract_features(df)
+        pca_features = pca.transform(features_df)
+        prediction = model.predict(pca_features)
+        prediction_list = prediction.tolist()
+
+        return {"prediction": prediction_list}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 
 def pre_process(df: pd.DataFrame):
     """Pre-processes data: resample to 50Hz, scale sensor data, and apply Gaussian smoothing per filename"""
@@ -88,27 +110,4 @@ def extract_features(df: pd.DataFrame):
 
     return pd.DataFrame(features)
 
-
-@app.post("/predict")
-async def predict(data: IMUBatch):
-    try:
-        df = pd.DataFrame([{
-            'accel_x_list': point.accel_x,
-            'accel_y_list': point.accel_y,
-            'accel_z_list': point.accel_z,
-            'gyro_x_list': point.gyro_x,
-            'gyro_y_list': point.gyro_y,
-            'gyro_z_list': point.gyro_z
-        } for point in data.data])
-
-        df = pre_process(df)
-        features_df = extract_features(df)
-        pca_features = pca.transform(features_df)
-        prediction = model.predict(pca_features)
-        prediction_list = prediction.tolist()
-
-        return {"prediction": prediction_list}
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
