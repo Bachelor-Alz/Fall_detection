@@ -6,7 +6,7 @@ from sklearn.model_selection import StratifiedKFold
 from sklearn.ensemble import RandomForestClassifier
 from imblearn.over_sampling import SMOTE
 from sklearn.metrics import balanced_accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
-from joblib import Parallel, delayed
+from joblib import Parallel, delayed, dump
 from FallDetector import FallDetector
 from LoadData import UmaFallLoader, UpFallLoader, WedaFallLoader
 import pandas as pd
@@ -46,7 +46,8 @@ class ModelTester:
                 features_df = fall_detector.extract_features(df)
             
             features_df.dropna(axis=0, how='any', inplace=True)
-            self.metrics.append(self.evaluate_model(features_df, window_size, overlap))
+            self.train_and_save_model(features_df, window_size, overlap)
+            #self.metrics.append(self.evaluate_model(features_df, window_size, overlap))
 
         final_results = pd.DataFrame(self.metrics)
         if os.path.exists(self.results_file):
@@ -130,6 +131,30 @@ class ModelTester:
         else:
             return self.metrics
         
+    def train_and_save_model(self, df, window_size, overlap):
+        """Train the model and save the PCA transformation and model to disk."""
+        print(f"Training and saving model for {window_size, overlap}")
+        X = df.drop(columns=['is_fall', 'filename', 'start_time', 'end_time'])
+        y = df['is_fall'].reset_index(drop=True)
+        
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(X)
+        pca = PCA(n_components=self.n_components)
+        X_pca = pca.fit_transform(X_scaled)
+        smote = SMOTE(sampling_strategy='minority', random_state=42, k_neighbors=20)
+        X_smote, y_smote = smote.fit_resample(X_pca, y)
+
+        model = RandomForestClassifier(random_state=42, n_jobs=-1, class_weight={0: 1, 1: 3})
+        model.fit(X_smote, y_smote)
+
+        # Save the PCA and model
+        model_filename = f"fall_detection_model.joblib"
+        pca_filename = f"pca_transformation.joblib"
+        dump(model, model_filename)
+        dump(pca, pca_filename)
+        
+        print(f"Model and PCA saved as {model_filename} and {pca_filename}")
+        
     def visualize_smote(self, features_file_path): 
         # Load data
         df = pd.read_csv(features_file_path)
@@ -180,4 +205,5 @@ if __name__ == '__main__':
 
 
     #ModelTester(configs=[(50, 41)], n_kfolds=5).visualize_smote(os.path.join(os.getcwd(), 'features', 'features_w45_o40.csv'))
+
 
