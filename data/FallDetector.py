@@ -7,6 +7,7 @@ from sklearn.preprocessing import StandardScaler
 import warnings
 from LoadData import BaseLoader
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+from scipy.ndimage import gaussian_filter1d
 
 warnings.filterwarnings('ignore', category=RuntimeWarning, message=".*Precision loss occurred.*")
 StrPath = Union[str, os.PathLike]
@@ -45,7 +46,7 @@ class FallDetector:
         return value
 
     def pre_process(self, df: pd.DataFrame):
-        """Pre-processes data: resample to 50Hz and scales sensor data"""
+        """Pre-processes data: resample to 50Hz, scale sensor data, and apply Gaussian smoothing per filename"""
         print("Pre-processing data")
         uma_df = df[df['filename'].str.contains('UMA', na=False)]
         up_df = df[~df['filename'].str.contains('UMA|U', na=False)]
@@ -54,7 +55,7 @@ class FallDetector:
         columns_to_scale = ['accel_x_list', 'accel_y_list', 'accel_z_list',
                             'gyro_x_list', 'gyro_y_list', 'gyro_z_list']
 
-
+        # Fix multiple periods and convert to numeric
         for col in columns_to_scale:
             uma_df.loc[:, col] = uma_df[col].apply(self.fix_multiple_periods)
             weda_df.loc[:, col] = weda_df[col].apply(self.fix_multiple_periods)
@@ -64,6 +65,7 @@ class FallDetector:
             weda_df.loc[:, col] = pd.to_numeric(weda_df[col], errors='coerce')
             up_df.loc[:, col] = pd.to_numeric(up_df[col], errors='coerce')
 
+        # Scale the data
         scaler_uma = StandardScaler()
         scaler_non_uma = StandardScaler()
         scaler_up = StandardScaler()
@@ -71,8 +73,11 @@ class FallDetector:
         uma_df.loc[:, columns_to_scale] = scaler_uma.fit_transform(uma_df[columns_to_scale])
         weda_df.loc[:, columns_to_scale] = scaler_non_uma.fit_transform(weda_df[columns_to_scale])
         up_df.loc[:, columns_to_scale] = scaler_up.fit_transform(up_df[columns_to_scale])
-        
+
+        # Combine dataframes
         df = pd.concat([uma_df, weda_df, up_df])
+
+        # Resample data
         grouped = df.groupby('filename')
         resampled_df = []
 
@@ -81,11 +86,17 @@ class FallDetector:
             resampled_df.append(group_resampled)
 
         df_resampled = pd.concat(resampled_df)
-        scalar = StandardScaler()
 
-        df_resampled.loc[:, columns_to_scale] = scalar.fit_transform(df_resampled[columns_to_scale])
+        # Apply Gaussian smoothing per filename
+        smoothed_df = []
+        for filename, group in df_resampled.groupby('filename'):
+            for col in columns_to_scale:
+                group[col] = self._apply_gaussian_filter(group[col].values)
+            smoothed_df.append(group)
+
+        df_smoothed = pd.concat(smoothed_df)
         print("Pre-processed data")
-        return df_resampled
+        return df_smoothed
    
 
     def _resample_data(self, group: pd.DataFrame):
@@ -96,8 +107,17 @@ class FallDetector:
         ms = '20.00ms'
         group.index = group.index.round(ms)
         group = group[~group.index.duplicated(keep='first')]
+        
         # Drop the non-numeric column 'filename'
         numeric_group = group.drop(columns=['filename'])
+        
+        # Separate datetime columns (start_time and end_time) from numeric columns
+        datetime_cols = ['start_time', 'end_time']
+        datetime_data = numeric_group[datetime_cols]  # Save datetime columns
+        numeric_data = numeric_group.drop(columns=datetime_cols)  # Keep only numeric data
+
+        # Ensure numeric columns are converted to numeric types
+        numeric_data = numeric_data.apply(pd.to_numeric, errors='coerce')
 
         # Align start time to nearest 20ms
         new_start_time = numeric_group.index.min().floor(ms)  
@@ -105,12 +125,20 @@ class FallDetector:
                                     end=numeric_group.index.max(), 
                                     freq=ms)
         
-        numeric_resampled = numeric_group.reindex(new_time_index).interpolate(method='linear').bfill().ffill()
+        # Resample and interpolate only numeric data
+        numeric_resampled = numeric_data.reindex(new_time_index).interpolate(method='linear').bfill().ffill()
+        
+        # Reattach the datetime columns without interpolation
+        numeric_resampled[datetime_cols] = datetime_data.reindex(new_time_index, method='ffill')
+        
         numeric_resampled.reset_index(inplace=True)
         numeric_resampled.rename(columns={'index': 'time'}, inplace=True)
         numeric_resampled['filename'] = group['filename'].iloc[0]
         return numeric_resampled
-
+    
+    def _apply_gaussian_filter(self, data, sigma=5):
+        return gaussian_filter1d(data, sigma=sigma)
+        
 
 
     def extract_features(self, df: pd.DataFrame):
@@ -142,7 +170,7 @@ class FallDetector:
                 is_fall = 0
             else:
                 is_fall = 1 if ((window['time'] >= window['start_time']) & 
-                                (window['time'] <= window['end_time'])).sum() / window_size >= 0.5 else 0
+                                (window['time'] <= window['end_time'])).sum() / window_size >= 0.6 else 0
             
             feature_dict = {
                 'filename': filename,

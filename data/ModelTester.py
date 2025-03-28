@@ -6,7 +6,7 @@ from sklearn.model_selection import StratifiedKFold
 from sklearn.ensemble import RandomForestClassifier
 from imblearn.over_sampling import SMOTE
 from sklearn.metrics import balanced_accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
-from joblib import Parallel, delayed
+from joblib import Parallel, delayed, dump
 from FallDetector import FallDetector
 from LoadData import UmaFallLoader, UpFallLoader, WedaFallLoader
 import pandas as pd
@@ -14,6 +14,7 @@ import numpy as np
 import os
 import datetime
 import pytz
+
 class ModelTester:
     def __init__(self, configs, results_file="results.csv", n_features=50, n_kfolds=5, n_components=0.80):
         """Initialize the tester with multiple configurations."""
@@ -44,7 +45,9 @@ class ModelTester:
                 df = fall_detector.pre_process(df)
                 features_df = fall_detector.extract_features(df)
             
-            self.metrics.append(self.evaluate_model(features_df, window_size, overlap))
+            features_df.dropna(axis=0, how='any', inplace=True)
+            self.train_and_save_model(features_df, window_size, overlap)
+            #self.metrics.append(self.evaluate_model(features_df, window_size, overlap))
 
         final_results = pd.DataFrame(self.metrics)
         if os.path.exists(self.results_file):
@@ -54,7 +57,6 @@ class ModelTester:
 
     def evaluate_model(self, df, window_size, overlap):
         print(f"Evaluating model {window_size, overlap}")
-        print(df['is_fall'].value_counts())
         X = df.drop(columns=['is_fall', 'filename', 'start_time', 'end_time'])
         y = df['is_fall'].reset_index(drop=True)
         scaler = StandardScaler()
@@ -73,11 +75,10 @@ class ModelTester:
             X_train, X_test = X_pca[train_index], X_pca[test_index]
             y_train, y_test = y.iloc[train_index], y.iloc[test_index]
 
-            # Apply SMOTE on PCA-transformed features
-            smote = SMOTE(random_state=42, k_neighbors=5)
+            smote = SMOTE(sampling_strategy='minority', random_state=42, k_neighbors=20)
             X_train_smote, y_train_smote = smote.fit_resample(X_train, y_train)
             
-            model = RandomForestClassifier(random_state=42, n_jobs=-1, class_weight='balanced')
+            model = RandomForestClassifier(random_state=42, n_jobs=-1, class_weight={0: 1, 1:3})
             model.fit(X_train_smote, y_train_smote)  # Train on balanced dataset
             y_pred = model.predict(X_test)
 
@@ -96,7 +97,6 @@ class ModelTester:
                 "conf_matrix": confusion_matrix(y_test, y_pred)
             }
 
-        # Parallel execution for each fold
         results = Parallel(n_jobs=n_jobs, backend="loky")(
             delayed(process_fold)(train_idx, test_idx, fold + 1)
             for fold, (train_idx, test_idx) in enumerate(strat_kfold.split(X_pca, y))
@@ -131,6 +131,30 @@ class ModelTester:
         else:
             return self.metrics
         
+    def train_and_save_model(self, df, window_size, overlap):
+        """Train the model and save the PCA transformation and model to disk."""
+        print(f"Training and saving model for {window_size, overlap}")
+        X = df.drop(columns=['is_fall', 'filename', 'start_time', 'end_time'])
+        y = df['is_fall'].reset_index(drop=True)
+        
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(X)
+        pca = PCA(n_components=self.n_components)
+        X_pca = pca.fit_transform(X_scaled)
+        smote = SMOTE(sampling_strategy='minority', random_state=42, k_neighbors=20)
+        X_smote, y_smote = smote.fit_resample(X_pca, y)
+
+        model = RandomForestClassifier(random_state=42, n_jobs=-1, class_weight={0: 1, 1: 3})
+        model.fit(X_smote, y_smote)
+
+        # Save the PCA and model
+        model_filename = "fall_detection_model.joblib"
+        pca_filename = "pca_transformation.joblib"
+        dump(model, model_filename)
+        dump(pca, pca_filename)
+        
+        print(f"Model and PCA saved as {model_filename} and {pca_filename}")
+        
     def visualize_smote(self, features_file_path): 
         # Load data
         df = pd.read_csv(features_file_path)
@@ -147,7 +171,7 @@ class ModelTester:
         X_pca = pca.fit_transform(X_scaled)
 
         # Apply SMOTE
-        smote = SMOTE(random_state=42, k_neighbors=3)
+        smote = SMOTE(sampling_strategy='minority', random_state=42, k_neighbors=3)
         X_resampled, y_resampled = smote.fit_resample(X_scaled, y)
 
         # Apply PCA again to visualize synthetic vs. original
@@ -171,7 +195,8 @@ if __name__ == '__main__':
     # Example usage
         
 
-    tester = ModelTester(configs=[(45, 40)
+    tester = ModelTester(configs=[
+    (80, 75)
                                 ], n_kfolds=5)
     tester.run_tests()
     results = tester.get_results()
@@ -180,4 +205,5 @@ if __name__ == '__main__':
 
 
     #ModelTester(configs=[(50, 41)], n_kfolds=5).visualize_smote(os.path.join(os.getcwd(), 'features', 'features_w45_o40.csv'))
+
 
