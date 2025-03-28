@@ -148,8 +148,8 @@ class ModelTester:
         model.fit(X_smote, y_smote)
 
         # Save the PCA and model
-        model_filename = f"fall_detection_model.joblib"
-        pca_filename = f"pca_transformation.joblib"
+        model_filename = "fall_detection_model.joblib"
+        pca_filename = "pca_transformation.joblib"
         dump(model, model_filename)
         dump(pca, pca_filename)
         

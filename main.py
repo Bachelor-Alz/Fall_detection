@@ -13,8 +13,6 @@ pca = joblib.load("pca_transformation.joblib")
 
 app = FastAPI()
 
-WINDOW_SIZE = 80
-OVERLAP = 75
 
 class IMUDataPoint(BaseModel):
     accel_x: float
@@ -26,6 +24,10 @@ class IMUDataPoint(BaseModel):
 
 @app.post("/predict")
 async def predict(data: List[IMUDataPoint]):
+    if not data:
+        raise HTTPException(status_code=400, detail="No IMU data provided.")
+
+
     try:
         df = pd.DataFrame([{
             'accel_x_list': point.accel_x,
@@ -34,15 +36,14 @@ async def predict(data: List[IMUDataPoint]):
             'gyro_x_list': point.gyro_x,
             'gyro_y_list': point.gyro_y,
             'gyro_z_list': point.gyro_z
-        } for point in data.data])
+        } for point in data])
 
         df = pre_process(df)
         features_df = extract_features(df)
         pca_features = pca.transform(features_df)
         prediction = model.predict(pca_features)
         prediction_list = prediction.tolist()
-
-        return {"prediction": prediction_list}
+        return prediction_list
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -64,6 +65,8 @@ def pre_process(df: pd.DataFrame):
 
 def extract_features(df: pd.DataFrame):
     """Extracts features from the data"""
+    WINDOW_SIZE = 80
+    OVERLAP = 75
     step_size = WINDOW_SIZE - OVERLAP
     features = []
     columns_to_use = ['gyro_x_list', 'gyro_y_list', 'gyro_z_list', 
