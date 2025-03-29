@@ -70,7 +70,6 @@ def pre_process(df: pd.DataFrame):
     columns_to_scale = ['accel_x_list', 'accel_y_list', 'accel_z_list',
                         'gyro_x_list', 'gyro_y_list', 'gyro_z_list']
     
-    # Scale the raw sensor data
     df[columns_to_scale] = raw_scaler.transform(df[columns_to_scale])
 
     for col in columns_to_scale:
@@ -84,15 +83,14 @@ def extract_features(df: pd.DataFrame):
     columns_to_use = ['gyro_x_list', 'gyro_y_list', 'gyro_z_list', 
                       'accel_x_list', 'accel_y_list', 'accel_z_list']
     
-    # Convert DataFrame to NumPy array
-    data = df[columns_to_use].values  # Shape: (num_samples, num_features)
-    num_windows = (len(data) - WINDOW_SIZE) // step_size  # Number of windows to extract
+    data = df[columns_to_use].values  
+    num_windows = (len(data) - WINDOW_SIZE) // step_size  
     features = []
 
     for i in range(num_windows):
         start_idx = i * step_size
         end_idx = start_idx + WINDOW_SIZE
-        window = data[start_idx:end_idx]  # Shape: (WINDOW_SIZE, num_features)
+        window = data[start_idx:end_idx] 
         feature_dict = {}
 
         for j, col in enumerate(columns_to_use):
@@ -114,9 +112,14 @@ def extract_features(df: pd.DataFrame):
                                                  (np.argmax(col_data) - np.argmin(col_data))**2)
             feature_dict[f'{col}_MD'] = np.max(np.diff(col_data)) if len(col_data) > 1 else 0
 
-        # Compute magnitude features
-        accel_mag = np.linalg.norm(window[:, 3:6], axis=1)  # Using columns accel_x, accel_y, accel_z
-        gyro_mag = np.linalg.norm(window[:, 0:3], axis=1)  # Using columns gyro_x, gyro_y, gyro_z
+
+        """ Array indexing like this means:
+        Before : we are choosing rows
+        After  : we are choosing columns
+        So we are choosing all rows and columns 3 to 6 (accel) and 0 to 3 (gyro) """
+
+        accel_mag = np.linalg.norm(window[:, 3:6], axis=1) 
+        gyro_mag = np.linalg.norm(window[:, 0:3], axis=1)  
 
         for mag, prefix in zip([accel_mag, gyro_mag], ['accel_magnitude', 'gyro_magnitude']):
             feature_dict[f'{prefix}_mean'] = np.mean(mag)

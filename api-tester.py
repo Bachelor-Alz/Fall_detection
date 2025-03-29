@@ -9,7 +9,8 @@ with open("large-json.json", "r") as f:
     payload = json.load(f)
 
 start_time = time.time()
-response = requests.post(url, json=payload, headers=headers)
+for i in range(100): 
+    response = requests.post(url, json=payload, headers=headers)
 end_time = time.time()
 
 print(f"Response Time: {end_time - start_time:.2f} seconds")
