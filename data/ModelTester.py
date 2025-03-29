@@ -47,7 +47,7 @@ class ModelTester:
             
             features_df.dropna(axis=0, how='any', inplace=True)
             self.train_and_save_model(features_df, window_size, overlap)
-            #self.metrics.append(self.evaluate_model(features_df, window_size, overlap))
+            self.metrics.append(self.evaluate_model(features_df, window_size, overlap))
 
         final_results = pd.DataFrame(self.metrics)
         if os.path.exists(self.results_file):
@@ -131,7 +131,7 @@ class ModelTester:
         else:
             return self.metrics
         
-    def train_and_save_model(self, df, window_size, overlap):
+    def train_and_save_model(self, df : pd.DataFrame, window_size, overlap):
         """Train the model and save the PCA transformation and model to disk."""
         print(f"Training and saving model for {window_size, overlap}")
         X = df.drop(columns=['is_fall', 'filename', 'start_time', 'end_time'])
@@ -140,7 +140,9 @@ class ModelTester:
         scaler = StandardScaler()
         X_scaled = scaler.fit_transform(X)
         pca = PCA(n_components=self.n_components)
-        X_pca = pca.fit_transform(X_scaled)
+        X_pca = pca.fit_transform(X_scaled)  # Fit PCA first
+        num_components = X_pca.shape[1]  # Get actual number of components
+        X_pca = pd.DataFrame(X_pca, columns=[f'PC{i+1}' for i in range(num_components)])
         smote = SMOTE(sampling_strategy='minority', random_state=42, k_neighbors=20)
         X_smote, y_smote = smote.fit_resample(X_pca, y)
 
@@ -148,10 +150,17 @@ class ModelTester:
         model.fit(X_smote, y_smote)
 
         # Save the PCA and model
+        model_dir = os.path.join(os.pardir)
         model_filename = "fall_detection_model.joblib"
         pca_filename = "pca_transformation.joblib"
+        scaler_filename = "features_scaler.joblib"
+        model_filename = os.path.join(model_dir, model_filename)
+        pca_filename = os.path.join(model_dir, pca_filename)
+        scaler_filename = os.path.join(model_dir, scaler_filename)
+
         dump(model, model_filename)
         dump(pca, pca_filename)
+        dump(scaler, scaler_filename)
         
         print(f"Model and PCA saved as {model_filename} and {pca_filename}")
         
