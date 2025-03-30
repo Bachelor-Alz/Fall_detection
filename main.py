@@ -30,6 +30,7 @@ class IMUDataPoint(BaseModel):
     gy: float
     gz: float
 
+
 @app.post("/predict")
 async def predict(data: List[IMUDataPoint], background_tasks: BackgroundTasks): 
     if not data:
