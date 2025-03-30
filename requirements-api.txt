@@ -1,0 +1,10 @@
+fastapi
+pydantic
+joblib
+pandas
+numpy
+scikit-learn
+httpx
+uvicorn
+scipy
+annotated-types

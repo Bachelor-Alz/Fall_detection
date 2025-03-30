@@ -27,7 +27,7 @@ python3 -m venv venv
 
 3. Install dependencies
    ```bash
-   pip install -r requirements.txt
+   pip install -r requirements-dev.txt
    ```
 
 ## Running the project
@@ -40,6 +40,12 @@ for changes to be reflected immediatly use:
 
 ```bash
 uvicorn main:app --reload --port 9999
+```
+
+If you want to make the API faster you can utilise multiple CPU cores
+
+```bash
+uvicorn main:app --host 0.0.0.0 --port 9999 --workers 4
 ```
 
 ## Swagger Documentation

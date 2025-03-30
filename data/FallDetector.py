@@ -2,6 +2,7 @@ import re
 import pandas as pd
 import numpy as np
 import os
+import joblib
 from typing import Union
 from sklearn.preprocessing import StandardScaler
 import warnings
@@ -45,9 +46,11 @@ class FallDetector:
             value = re.sub(r'(\d+)\.(\d+)\.(\d+)', r'\1\.\2\3', value)
         return value
 
+
     def pre_process(self, df: pd.DataFrame):
         """Pre-processes data: resample to 50Hz, scale sensor data, and apply Gaussian smoothing per filename"""
         print("Pre-processing data")
+
         uma_df = df[df['filename'].str.contains('UMA', na=False)]
         up_df = df[~df['filename'].str.contains('UMA|U', na=False)]
         weda_df = df[df['filename'].str.contains(r'U\d{2}_R\d{2}', na=False, regex=True)]
@@ -65,20 +68,28 @@ class FallDetector:
             weda_df.loc[:, col] = pd.to_numeric(weda_df[col], errors='coerce')
             up_df.loc[:, col] = pd.to_numeric(up_df[col], errors='coerce')
 
-        # Scale the data
+        # Scale the individual datasets first
         scaler_uma = StandardScaler()
         scaler_non_uma = StandardScaler()
         scaler_up = StandardScaler()
 
-        uma_df.loc[:, columns_to_scale] = scaler_uma.fit_transform(uma_df[columns_to_scale])
-        weda_df.loc[:, columns_to_scale] = scaler_non_uma.fit_transform(weda_df[columns_to_scale])
-        up_df.loc[:, columns_to_scale] = scaler_up.fit_transform(up_df[columns_to_scale])
+        uma_df[columns_to_scale] = scaler_uma.fit_transform(uma_df[columns_to_scale])
+        weda_df[columns_to_scale] = scaler_non_uma.fit_transform(weda_df[columns_to_scale])
+        up_df[columns_to_scale] = scaler_up.fit_transform(up_df[columns_to_scale])
 
-        # Combine dataframes
-        df = pd.concat([uma_df, weda_df, up_df])
+        # Combine datasets after individual scaling
+        df_combined = pd.concat([uma_df, weda_df, up_df])
+
+        # Now, scale the entire combined dataset (optional collective scaling step)
+        scaler_combined = StandardScaler()
+        df_combined[columns_to_scale] = scaler_combined.fit_transform(df_combined[columns_to_scale])
+
+        # Save the combined scaler for later use in the API
+        save_location = os.path.join(os.pardir, 'combined_scaler.joblib')
+        joblib.dump(scaler_combined, save_location)
 
         # Resample data
-        grouped = df.groupby('filename')
+        grouped = df_combined.groupby('filename')
         resampled_df = []
 
         for _, group in grouped:
@@ -89,14 +100,17 @@ class FallDetector:
 
         # Apply Gaussian smoothing per filename
         smoothed_df = []
-        for filename, group in df_resampled.groupby('filename'):
+        for _, group in df_resampled.groupby('filename'):
             for col in columns_to_scale:
                 group[col] = self._apply_gaussian_filter(group[col].values)
             smoothed_df.append(group)
 
         df_smoothed = pd.concat(smoothed_df)
+        df_smoothed.to_csv('test.csv', index=False)
         print("Pre-processed data")
         return df_smoothed
+
+
    
 
     def _resample_data(self, group: pd.DataFrame):
