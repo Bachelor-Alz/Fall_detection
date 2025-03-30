@@ -59,7 +59,7 @@ async def predict(data: List[IMUDataPoint], background_tasks: BackgroundTasks):
 
 async def send_prediction(list):
     async with httpx.AsyncClient() as client:
-        await client.post("http://localhost:5171/AI/compute", json=list)
+        await client.post("http://healthdevice_app:5171/AI/compute", json=list)
 
 def pre_process(df: pd.DataFrame):
     """Pre-processes data: resample to 50Hz, scale sensor data, and apply Gaussian smoothing per filename"""
