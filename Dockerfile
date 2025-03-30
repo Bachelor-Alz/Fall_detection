@@ -4,6 +4,8 @@ WORKDIR /app
 
 COPY fall_detection_model.joblib /app
 COPY pca_transformation.joblib /app
+COPY features_scaler.joblib /app
+COPY combined_scaler.joblib /app
 COPY main.py /app
 COPY requirements.txt /app
 

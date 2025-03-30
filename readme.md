@@ -42,6 +42,12 @@ for changes to be reflected immediatly use:
 uvicorn main:app --reload --port 9999
 ```
 
+If you want to make the API faster you can utilise multiple CPU cores
+
+```bash
+uvicorn main:app --host 0.0.0.0 --port 9999 --workers 4
+```
+
 ## Swagger Documentation
 
 Swagger documentation can be found at http://127.0.0.1:8000/docs

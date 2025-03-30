@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from typing import List
 import joblib
@@ -11,7 +11,6 @@ import httpx
 from fastapi import FastAPI, HTTPException
 import uvicorn
 from scipy.ndimage import gaussian_filter1d
-import time
 
 model : RandomForestClassifier = joblib.load("fall_detection_model.joblib")
 pca : PCA = joblib.load("pca_transformation.joblib")
@@ -31,10 +30,8 @@ class IMUDataPoint(BaseModel):
     gy: float
     gz: float
 
-
-
 @app.post("/predict")
-async def predict(data: List[IMUDataPoint]): 
+async def predict(data: List[IMUDataPoint], background_tasks: BackgroundTasks): 
     if not data:
         raise HTTPException(status_code=400, detail="No IMU data provided.")
     
@@ -53,17 +50,16 @@ async def predict(data: List[IMUDataPoint]):
         pca_features = pd.DataFrame(pca_features, columns=[f'PC{i+1}' for i in range(pca_features.shape[1])])
         prediction = model.predict(pca_features)
         prediction_list = prediction.tolist()
-
-        async with httpx.AsyncClient() as client:
-            response = await client.post("http://localhost:5171/AI/compute", json=prediction_list)
-            response.raise_for_status()
-
+        background_tasks.add_task(send_prediction, prediction_list)
         return prediction_list
     
     except Exception as e:
         print(e)
         raise HTTPException(status_code=500, detail=str(e))
 
+async def send_prediction(list):
+    async with httpx.AsyncClient() as client:
+        await client.post("http://localhost:5171/AI/compute", json=list)
 
 def pre_process(df: pd.DataFrame):
     """Pre-processes data: resample to 50Hz, scale sensor data, and apply Gaussian smoothing per filename"""
