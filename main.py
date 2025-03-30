@@ -8,7 +8,6 @@ from sklearn.decomposition import PCA
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
 import httpx
-from fastapi import FastAPI, HTTPException
 import uvicorn
 from scipy.ndimage import gaussian_filter1d
 

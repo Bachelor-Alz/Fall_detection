@@ -27,7 +27,7 @@ python3 -m venv venv
 
 3. Install dependencies
    ```bash
-   pip install -r requirements.txt
+   pip install -r requirements-dev.txt
    ```
 
 ## Running the project
