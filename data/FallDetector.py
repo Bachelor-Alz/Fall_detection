@@ -1,7 +1,9 @@
 import re
 import pandas as pd
-import numpy as np
+import sys
 import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+from process_window import process_window
 import joblib
 from typing import Union
 from sklearn.preprocessing import StandardScaler
@@ -9,6 +11,8 @@ import warnings
 from LoadData import BaseLoader
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from scipy.ndimage import gaussian_filter1d
+
+
 
 warnings.filterwarnings('ignore', category=RuntimeWarning, message=".*Precision loss occurred.*")
 StrPath = Union[str, os.PathLike]
@@ -35,9 +39,9 @@ class FallDetector:
         print("Loaded data")
 
         # Common operations for all datasets
-        df['start_time'] = pd.to_datetime(df['start_time'], unit='s')
-        df['end_time'] = pd.to_datetime(df['end_time'], unit='s')
-        df['time'] = pd.to_datetime(df['time'], unit='s')
+        df['start_time'] = pd.to_datetime(df['start_time'], errors="coerce", unit='s').fillna(pd.NaT)
+        df['end_time'] = pd.to_datetime(df['end_time'], errors="coerce", unit='s').fillna(pd.NaT)
+        df['time'] = pd.to_datetime(df['time'], errors="coerce", unit='s')
         return df
     
     def fix_multiple_periods(self, value):
@@ -67,6 +71,7 @@ class FallDetector:
             uma_df.loc[:, col] = pd.to_numeric(uma_df[col], errors='coerce')
             weda_df.loc[:, col] = pd.to_numeric(weda_df[col], errors='coerce')
             up_df.loc[:, col] = pd.to_numeric(up_df[col], errors='coerce')
+            
 
         # Scale the individual datasets first
         scaler_uma = StandardScaler()
@@ -106,7 +111,6 @@ class FallDetector:
             smoothed_df.append(group)
 
         df_smoothed = pd.concat(smoothed_df)
-        df_smoothed.to_csv('test.csv', index=False)
         print("Pre-processed data")
         return df_smoothed
 
@@ -154,83 +158,30 @@ class FallDetector:
         return gaussian_filter1d(data, sigma=sigma)
         
 
-
     def extract_features(self, df: pd.DataFrame):
         """Applies sliding window and extracts statistical features for each filename"""
-        window_size = self.window_size
-        step_size = window_size - self.overlap
         grouped = df.groupby('filename')
         features = []
+        step_size = self.window_size - self.overlap  
 
         with ProcessPoolExecutor() as executor:
             futures = []
             for filename, group in grouped:
-                for i in range(0, len(group) - window_size + 1, step_size):
-                    window = group.iloc[i:i + window_size]
-                    futures.append(executor.submit(FallDetector.process_window, window, filename, window_size))
+                futures.append(executor.submit(process_window, group, self.window_size, step_size, include_metadata=True))
 
             for future in futures:
                 features.append(future.result())
 
-        features_df = pd.DataFrame(features)
+        features_df = pd.concat(features)
         os.makedirs('features', exist_ok=True)
         features_df.to_csv(self.get_file_path(), index=False)
         print("Extracted features")
         return features_df
+
+
+
     
-    @staticmethod
-    def process_window(window, filename, window_size):
-            if(window['start_time'] is None or window['end_time'] is None):
-                is_fall = 0
-            else:
-                is_fall = 1 if ((window['time'] >= window['start_time']) & 
-                                (window['time'] <= window['end_time'])).sum() / window_size >= 0.6 else 0
-            
-            feature_dict = {
-                'filename': filename,
-                'start_time': window['time'].iloc[0],
-                'end_time': window['time'].iloc[-1],
-                'is_fall': is_fall
-            }
 
-            columns_to_use = ['gyro_x_list', 'gyro_y_list', 'gyro_z_list', 
-                        'accel_x_list', 'accel_y_list', 'accel_z_list']
-
-            for col in columns_to_use:
-                col_data = window[col]
-                feature_dict[f'{col}_mean'] = col_data.mean()
-                feature_dict[f'{col}_std'] = col_data.std()
-                feature_dict[f'{col}_min'] = col_data.min()
-                feature_dict[f'{col}_max'] = col_data.max()
-                feature_dict[f'{col}_median'] = col_data.median()
-                feature_dict[f'{col}_iqr'] = col_data.quantile(0.75) - col_data.quantile(0.25)
-                feature_dict[f'{col}_energy'] = np.sum(col_data**2)
-                feature_dict[f'{col}_rms'] = np.sqrt(np.mean(col_data**2))
-                feature_dict[f'{col}_sma'] = np.sum(np.abs(col_data)) / window_size
-                feature_dict[f'{col}_skew'] = col_data.skew()
-                feature_dict[f'{col}_kurtosis'] = col_data.kurtosis()
-                feature_dict[f'{col}_absum'] = np.sum(np.abs(col_data))
-                feature_dict[f'{col}_DDM'] = col_data.max() - col_data.min()
-                feature_dict[f'{col}_GMM'] = np.sqrt((col_data.max() - col_data.min())**2 + 
-                                                    (np.argmax(col_data) - np.argmin(col_data))**2)
-                feature_dict[f'{col}_MD'] = max(np.diff(col_data))
-
-            accel_magnitude = np.sqrt(window['accel_x_list']**2 + window['accel_y_list']**2 + window['accel_z_list']**2)
-            gyro_magnitude = np.sqrt(window['gyro_x_list']**2 + window['gyro_y_list']**2 + window['gyro_z_list']**2)
-
-            for mag, prefix in zip([accel_magnitude, gyro_magnitude], ['accel_magnitude', 'gyro_magnitude']):
-                feature_dict[f'{prefix}_mean'] = mag.mean()
-                feature_dict[f'{prefix}_std'] = mag.std()
-                feature_dict[f'{prefix}_min'] = mag.min()
-                feature_dict[f'{prefix}_max'] = mag.max()
-                feature_dict[f'{prefix}_median'] = mag.median()
-                feature_dict[f'{prefix}_iqr'] = mag.quantile(0.75) - mag.quantile(0.25)
-                feature_dict[f'{prefix}_energy'] = np.sum(mag**2)
-                feature_dict[f'{prefix}_rms'] = np.sqrt(np.mean(mag**2))
-                feature_dict[f'{prefix}_sma'] = np.sum(np.abs(mag)) / window_size
-
-            return feature_dict
-    
     def get_file_path(self) -> StrPath:
         """Returns the path to the features file"""
         os.makedirs('features', exist_ok=True)

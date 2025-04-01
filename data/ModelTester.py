@@ -45,8 +45,9 @@ class ModelTester:
                 df = fall_detector.pre_process(df)
                 features_df = fall_detector.extract_features(df)
             
+            # Print is_fall distribution 0 and 1
+            print(features_df['is_fall'].value_counts(normalize=True))
             features_df.dropna(axis=0, how='any', inplace=True)
-            self.train_and_save_model(features_df, window_size, overlap)
             self.metrics.append(self.evaluate_model(features_df, window_size, overlap))
 
         final_results = pd.DataFrame(self.metrics)
@@ -54,6 +55,8 @@ class ModelTester:
             final_results.to_csv(self.results_file, mode='a', header=False, index=False)
         else:
             final_results.to_csv(self.results_file, index=False)
+        
+        self.train_and_save_model(features_df, window_size, overlap)
 
     def evaluate_model(self, df, window_size, overlap):
         print(f"Evaluating model {window_size, overlap}")

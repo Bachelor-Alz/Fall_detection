@@ -88,7 +88,6 @@ class WedaFallLoader(BaseLoader):
                 merged['filename'] = folder + '/' + accel[0:7]
                 df = pd.concat([df, merged])
 
-        #Create fall_start and fall_end columns based on timestamps csv using filename column as key
         df = pd.merge(df, self.timestamps, how='left', left_on='filename', right_on='filename')
         return df
 
@@ -113,18 +112,13 @@ class UmaFallLoader(BaseLoader):
         for file in os.listdir(falls):
             file_path = os.path.join(falls, file)
             
-            # Read the CSV and process
+
             uma_df = pd.read_csv(file_path, skiprows=40, sep=';') 
             uma_df.columns = uma_df.columns.str.strip()
             uma_df.dropna(axis=1, how='all', inplace=True)
-
-            
-
             uma_df = uma_df[uma_df['Sensor ID'] == WRIST_SENSOR_ID]
             uma_df = uma_df[uma_df['Sensor Type'].isin([GYRO_SENSOR_TYPE, ACCELERO_SENSOR_TYPE])]
             uma_df = uma_df.rename(columns={'% TimeStamp': 'time'})
-            
-            # Convert timestamp in ms to seconds
             uma_df['time'] = uma_df['time'] / 1000
 
             acc_df = uma_df[uma_df['Sensor Type'] == ACCELERO_SENSOR_TYPE]
@@ -140,16 +134,12 @@ class UmaFallLoader(BaseLoader):
         for file in os.listdir(adl):
             file_path = os.path.join(adl, file)
             
-            # Read the CSV and process
             uma_df = pd.read_csv(file_path, skiprows=40, sep=';') 
             uma_df.columns = uma_df.columns.str.strip()
             uma_df.dropna(axis=1, how='all', inplace=True)
-
             uma_df = uma_df[uma_df['Sensor ID'] == WRIST_SENSOR_ID]
             uma_df = uma_df[uma_df['Sensor Type'].isin([GYRO_SENSOR_TYPE, ACCELERO_SENSOR_TYPE])]
             uma_df = uma_df.rename(columns={'% TimeStamp': 'time'})
-            
-            # Convert timestamp in ms to seconds
             uma_df['time'] = uma_df['time'] / 1000
 
             acc_df = uma_df[uma_df['Sensor Type'] == ACCELERO_SENSOR_TYPE]
