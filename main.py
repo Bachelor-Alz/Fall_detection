@@ -29,18 +29,25 @@ class IMUDataPoint(BaseModel):
     gy: float
     gz: float
 
+class RequestBody(BaseModel):
+    mac: str
+    readings: List[IMUDataPoint]
 
-@app.post("/predict")
-async def predict(data: List[IMUDataPoint], background_tasks: BackgroundTasks): 
-    if not data:
+class ResponseBody(BaseModel):
+    mac: str
+    predictions: List[int]
+
+@app.post("/predict", response_model=ResponseBody)
+async def predict(data: RequestBody, background_tasks: BackgroundTasks): 
+    if not data.readings:
         raise HTTPException(status_code=400, detail="No IMU data provided.")
     
     try:
         df = pd.DataFrame([{ 'accel_x_list': point.ax, 'accel_y_list': point.ay, 'accel_z_list': point.az,
                              'gyro_x_list': point.gx, 'gyro_y_list': point.gy, 'gyro_z_list': point.gz } 
-                            for point in data])
+                            for point in data.readings])
         
-        if len(data) < WINDOW_SIZE:
+        if len(data.readings) < WINDOW_SIZE:
             raise HTTPException(status_code=422, detail=f"Data length must be at least {WINDOW_SIZE} samples.")
 
         df = pre_process(df)
@@ -51,7 +58,8 @@ async def predict(data: List[IMUDataPoint], background_tasks: BackgroundTasks):
         prediction = model.predict(pca_features)
         prediction_list = prediction.tolist()
         background_tasks.add_task(send_prediction, prediction_list)
-        return prediction_list
+        return {"mac": data.mac, "predictions": prediction_list}
+
     
     except Exception as e:
         print(e)
