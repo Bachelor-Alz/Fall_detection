@@ -13,7 +13,6 @@ from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from scipy.ndimage import gaussian_filter1d
 
 
-
 warnings.filterwarnings('ignore', category=RuntimeWarning, message=".*Precision loss occurred.*")
 StrPath = Union[str, os.PathLike]
 
@@ -33,15 +32,11 @@ class FallDetector:
         with ThreadPoolExecutor() as executor:
             data_frames = list(executor.map(load_single_loader, self.data_loaders))
 
-        
-        # Combine all loaded data
         df = pd.concat(data_frames)
-        print("Loaded data")
-
-        # Common operations for all datasets
         df['start_time'] = pd.to_datetime(df['start_time'], errors="coerce", unit='s').fillna(pd.NaT)
         df['end_time'] = pd.to_datetime(df['end_time'], errors="coerce", unit='s').fillna(pd.NaT)
         df['time'] = pd.to_datetime(df['time'], errors="coerce", unit='s')
+        print("Loaded data")
         return df
     
     def fix_multiple_periods(self, value):
@@ -114,9 +109,6 @@ class FallDetector:
         print("Pre-processed data")
         return df_smoothed
 
-
-   
-
     def _resample_data(self, group: pd.DataFrame):
         """Resample the data to 50Hz (20ms interval) while handling duplicates and non-numeric columns.
         Also aligns the time to start at 00:00.000.
@@ -157,12 +149,13 @@ class FallDetector:
     def _apply_gaussian_filter(self, data, sigma=5):
         return gaussian_filter1d(data, sigma=sigma)
         
-
     def extract_features(self, df: pd.DataFrame):
         """Applies sliding window and extracts statistical features for each filename"""
         grouped = df.groupby('filename')
         features = []
         step_size = self.window_size - self.overlap  
+
+        excluded_features = self._get_excluded_features()
 
         with ProcessPoolExecutor() as executor:
             futures = []
@@ -177,10 +170,16 @@ class FallDetector:
         features_df.to_csv(self.get_file_path(), index=False)
         print("Extracted features")
         return features_df
-
-
-
     
+    def _get_excluded_features(self):
+        # Read PCA feature importance for this window size and overlap
+        pca_file_path = os.path.join('pca_feature_importance', f'feature_importance_w{self.window_size}_o{self.overlap}.csv')
+        if not os.path.exists(pca_file_path):
+            return None
+
+        df = pd.read_csv(pca_file_path)
+        excluded_features = set(df[df['PCA_Weighted_Importance'] < 0.01]['Feature'].tolist())
+        return excluded_features
 
     def get_file_path(self) -> StrPath:
         """Returns the path to the features file"""

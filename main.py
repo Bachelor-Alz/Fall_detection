@@ -3,13 +3,14 @@ from pydantic import BaseModel
 from typing import List
 import joblib
 import pandas as pd
-import numpy as np
 from sklearn.decomposition import PCA
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
 import httpx
 import uvicorn
 from scipy.ndimage import gaussian_filter1d
+
+from process_window import process_window
 
 model : RandomForestClassifier = joblib.load("fall_detection_model.joblib")
 pca : PCA = joblib.load("pca_transformation.joblib")
@@ -51,7 +52,8 @@ async def predict(data: RequestBody, background_tasks: BackgroundTasks):
             raise HTTPException(status_code=422, detail=f"Data length must be at least {WINDOW_SIZE} samples.")
 
         df = pre_process(df)
-        features_df = extract_features(df)
+        step_size = WINDOW_SIZE - OVERLAP
+        features_df = process_window(df, WINDOW_SIZE, step_size)
         features_df = features_scaler.transform(features_df)
         pca_features = pca.transform(features_df)
         pca_features = pd.DataFrame(pca_features, columns=[f'PC{i+1}' for i in range(pca_features.shape[1])])
@@ -80,65 +82,6 @@ def pre_process(df: pd.DataFrame):
         df[col] = gaussian_filter1d(df[col].values, sigma=5)
 
     return df
-
-def extract_features(df: pd.DataFrame):
-    """Extracts features from the data using NumPy for improved performance."""
-    step_size = WINDOW_SIZE - OVERLAP
-    columns_to_use = ['gyro_x_list', 'gyro_y_list', 'gyro_z_list', 
-                      'accel_x_list', 'accel_y_list', 'accel_z_list']
-    
-    data = df[columns_to_use].values  
-    num_windows = (len(data) - WINDOW_SIZE) // step_size  
-    features = []
-
-    for i in range(num_windows):
-        start_idx = i * step_size
-        end_idx = start_idx + WINDOW_SIZE
-        window = data[start_idx:end_idx] 
-        feature_dict = {}
-
-        for j, col in enumerate(columns_to_use):
-            col_data = window[:, j]
-            feature_dict[f'{col}_mean'] = np.mean(col_data)
-            feature_dict[f'{col}_std'] = np.std(col_data)
-            feature_dict[f'{col}_min'] = np.min(col_data)
-            feature_dict[f'{col}_max'] = np.max(col_data)
-            feature_dict[f'{col}_median'] = np.median(col_data)
-            feature_dict[f'{col}_iqr'] = np.percentile(col_data, 75) - np.percentile(col_data, 25)
-            feature_dict[f'{col}_energy'] = np.sum(col_data**2)
-            feature_dict[f'{col}_rms'] = np.sqrt(np.mean(col_data**2))
-            feature_dict[f'{col}_sma'] = np.sum(np.abs(col_data)) / WINDOW_SIZE
-            feature_dict[f'{col}_skew'] = ((col_data - np.mean(col_data))**3).mean() / (np.std(col_data)**3 + 1e-8)
-            feature_dict[f'{col}_kurtosis'] = ((col_data - np.mean(col_data))**4).mean() / (np.std(col_data)**4 + 1e-8)
-            feature_dict[f'{col}_absum'] = np.sum(np.abs(col_data))
-            feature_dict[f'{col}_DDM'] = np.max(col_data) - np.min(col_data)
-            feature_dict[f'{col}_GMM'] = np.sqrt((np.max(col_data) - np.min(col_data))**2 + 
-                                                 (np.argmax(col_data) - np.argmin(col_data))**2)
-            feature_dict[f'{col}_MD'] = np.max(np.diff(col_data)) if len(col_data) > 1 else 0
-
-
-        """ Array indexing like this means:
-        Before : we are choosing rows
-        After  : we are choosing columns
-        So we are choosing all rows and columns 3 to 6 (accel) and 0 to 3 (gyro) """
-
-        accel_mag = np.linalg.norm(window[:, 3:6], axis=1) 
-        gyro_mag = np.linalg.norm(window[:, 0:3], axis=1)  
-
-        for mag, prefix in zip([accel_mag, gyro_mag], ['accel_magnitude', 'gyro_magnitude']):
-            feature_dict[f'{prefix}_mean'] = np.mean(mag)
-            feature_dict[f'{prefix}_std'] = np.std(mag)
-            feature_dict[f'{prefix}_min'] = np.min(mag)
-            feature_dict[f'{prefix}_max'] = np.max(mag)
-            feature_dict[f'{prefix}_median'] = np.median(mag)
-            feature_dict[f'{prefix}_iqr'] = np.percentile(mag, 75) - np.percentile(mag, 25)
-            feature_dict[f'{prefix}_energy'] = np.sum(mag**2)
-            feature_dict[f'{prefix}_rms'] = np.sqrt(np.mean(mag**2))
-            feature_dict[f'{prefix}_sma'] = np.sum(np.abs(mag)) / WINDOW_SIZE
-
-        features.append(feature_dict)
-
-    return pd.DataFrame(features)
 
 
 if __name__ == "__main__":

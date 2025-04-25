@@ -1,7 +1,7 @@
 from matplotlib import pyplot as plt
 import pandas as pd
 
-df = pd.read_csv('features/features_w45_o40.csv')
+df = pd.read_csv('features/features_w80_o75.csv')
 timestamps = pd.read_csv('UMA_fall_timestamps.csv')
 
 # Ensure that the 'start_time' column in df is of datetime type

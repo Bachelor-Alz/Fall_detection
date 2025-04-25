@@ -45,8 +45,6 @@ class ModelTester:
                 df = fall_detector.pre_process(df)
                 features_df = fall_detector.extract_features(df)
             
-            # Print is_fall distribution 0 and 1
-            print(features_df['is_fall'].value_counts(normalize=True))
             features_df.dropna(axis=0, how='any', inplace=True)
             self.metrics.append(self.evaluate_model(features_df, window_size, overlap))
 
@@ -66,9 +64,8 @@ class ModelTester:
         X_scaled = scaler.fit_transform(X)
         
         # Apply PCA
-        pca = PCA(n_components=self.n_components)  # n_components = 0.95 means preserving 95% of variance
+        pca = PCA(n_components=self.n_components)
         X_pca = pca.fit_transform(X_scaled)
-
         strat_kfold = StratifiedKFold(n_splits=self.n_kfolds, shuffle=True, random_state=42)
         n_jobs = max(1, os.cpu_count() // 2 + 1)  # Adjust n_jobs based on available CPU cores
 
@@ -85,12 +82,6 @@ class ModelTester:
             model.fit(X_train_smote, y_train_smote)  # Train on balanced dataset
             y_pred = model.predict(X_test)
 
-            # Print feature importances
-            pca_importance = np.abs(pca.components_.T @ pca.explained_variance_ratio_)
-            feature_importance_pca = pd.DataFrame({'Feature': X.columns, 'PCA_Weighted_Importance': pca_importance})
-            feature_importance_pca = feature_importance_pca.sort_values(by='PCA_Weighted_Importance', ascending=False)
-            print(feature_importance_pca.to_string())
-
             # Return a dictionary of metrics for each fold
             return {
                 "balanced_acc": balanced_accuracy_score(y_test, y_pred),
@@ -105,7 +96,6 @@ class ModelTester:
             for fold, (train_idx, test_idx) in enumerate(strat_kfold.split(X_pca, y))
         )
 
-        # Aggregate the results
         avg_metrics = {key: np.mean([res[key] for res in results]) for key in ["balanced_acc", "precision", "recall", "f1"]}
         avg_conf_matrix = np.mean([res["conf_matrix"] for res in results], axis=0).astype(int)
         tn, fp, fn, tp = avg_conf_matrix.ravel()
@@ -143,8 +133,8 @@ class ModelTester:
         scaler = StandardScaler()
         X_scaled = scaler.fit_transform(X)
         pca = PCA(n_components=self.n_components)
-        X_pca = pca.fit_transform(X_scaled)  # Fit PCA first
-        num_components = X_pca.shape[1]  # Get actual number of components
+        X_pca = pca.fit_transform(X_scaled)  
+        num_components = X_pca.shape[1]
         X_pca = pd.DataFrame(X_pca, columns=[f'PC{i+1}' for i in range(num_components)])
         smote = SMOTE(sampling_strategy='minority', random_state=42, k_neighbors=20)
         X_smote, y_smote = smote.fit_resample(X_pca, y)
@@ -166,47 +156,8 @@ class ModelTester:
         dump(scaler, scaler_filename)
         
         print(f"Model and PCA saved as {model_filename} and {pca_filename}")
-        
-    def visualize_smote(self, features_file_path): 
-        # Load data
-        df = pd.read_csv(features_file_path)
-        X = df.drop(columns=['is_fall', 'filename', 'start_time', 'end_time'])
-        y = df['is_fall'].reset_index(drop=True)
-
-        # Create imbalanced data
-        X, y = make_classification(n_classes=2, weights=[0.9, 0.1], n_features=10, random_state=42)
-        scaler = StandardScaler()
-        X_scaled = scaler.fit_transform(X)
-
-        # Apply PCA to reduce to 3D for visualization
-        pca = PCA(n_components=3)
-        X_pca = pca.fit_transform(X_scaled)
-
-        # Apply SMOTE
-        smote = SMOTE(sampling_strategy='minority', random_state=42, k_neighbors=3)
-        X_resampled, y_resampled = smote.fit_resample(X_scaled, y)
-
-        # Apply PCA again to visualize synthetic vs. original
-        X_resampled_pca = pca.transform(X_resampled)
-
-        # Plot original vs. synthetic data in 3D
-        fig = plt.figure(figsize=(10, 8))
-        ax = fig.add_subplot(111, projection='3d')
-        ax.scatter(X_pca[y == 0, 0], X_pca[y == 0, 1], X_pca[y == 0, 2], label="Majority Class (Original)", alpha=0.5)
-        ax.scatter(X_pca[y == 1, 0], X_pca[y == 1, 1], X_pca[y == 1, 2], label="Minority Class (Original)", color='red', alpha=0.5)
-        ax.scatter(X_resampled_pca[len(y):, 0], X_resampled_pca[len(y):, 1], X_resampled_pca[len(y):, 2], label="Synthetic Minority (SMOTE)", color='green', alpha=0.5)
-
-        ax.set_xlabel("PCA Feature 1")
-        ax.set_ylabel("PCA Feature 2")
-        ax.set_zlabel("PCA Feature 3")
-        ax.set_title("SMOTE: Original vs. Synthetic Data Points (3D)")
-        ax.legend()
-        plt.show()
 
 if __name__ == '__main__':
-    # Example usage
-        
-
     tester = ModelTester(configs=[
     (80, 75)
                                 ], n_kfolds=5)
@@ -214,8 +165,5 @@ if __name__ == '__main__':
     results = tester.get_results()
     print(results) 
     
-
-
-    #ModelTester(configs=[(50, 41)], n_kfolds=5).visualize_smote(os.path.join(os.getcwd(), 'features', 'features_w45_o40.csv'))
 
 
