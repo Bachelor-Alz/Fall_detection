@@ -1,0 +1,151 @@
+folder_name,is_fall,file_name
+Clap,False,1.csv
+Clap,False,10.csv
+Clap,False,11.csv
+Clap,False,12.csv
+Clap,False,13.csv
+Clap,False,14.csv
+Clap,False,15.csv
+Clap,False,2.csv
+Clap,False,3.csv
+Clap,False,4.csv
+Clap,False,5.csv
+Clap,False,6.csv
+Clap,False,7.csv
+Clap,True,8.csv
+Clap,False,9.csv
+Fall forwards,True,1.csv
+Fall forwards,False,10.csv
+Fall forwards,True,11.csv
+Fall forwards,True,12.csv
+Fall forwards,False,13.csv
+Fall forwards,True,14.csv
+Fall forwards,True,15.csv
+Fall forwards,True,2.csv
+Fall forwards,True,3.csv
+Fall forwards,True,4.csv
+Fall forwards,True,5.csv
+Fall forwards,True,6.csv
+Fall forwards,True,7.csv
+Fall forwards,True,8.csv
+Fall forwards,True,9.csv
+Fall sideways (Left),True,1.csv
+Fall sideways (Left),True,10.csv
+Fall sideways (Left),True,11.csv
+Fall sideways (Left),False,12.csv
+Fall sideways (Left),True,13.csv
+Fall sideways (Left),False,14.csv
+Fall sideways (Left),True,15.csv
+Fall sideways (Left),True,2.csv
+Fall sideways (Left),True,3.csv
+Fall sideways (Left),True,4.csv
+Fall sideways (Left),True,5.csv
+Fall sideways (Left),False,6.csv
+Fall sideways (Left),True,7.csv
+Fall sideways (Left),False,8.csv
+Fall sideways (Left),True,9.csv
+Fall sideways (Right),False,1.csv
+Fall sideways (Right),True,10.csv
+Fall sideways (Right),True,11.csv
+Fall sideways (Right),True,12.csv
+Fall sideways (Right),True,13.csv
+Fall sideways (Right),True,14.csv
+Fall sideways (Right),True,15.csv
+Fall sideways (Right),False,2.csv
+Fall sideways (Right),False,3.csv
+Fall sideways (Right),False,4.csv
+Fall sideways (Right),True,5.csv
+Fall sideways (Right),False,6.csv
+Fall sideways (Right),False,7.csv
+Fall sideways (Right),True,8.csv
+Fall sideways (Right),True,9.csv
+Fall when trying to sit down,False,1.csv
+Fall when trying to sit down,True,10.csv
+Fall when trying to sit down,False,11.csv
+Fall when trying to sit down,True,12.csv
+Fall when trying to sit down,True,13.csv
+Fall when trying to sit down,True,14.csv
+Fall when trying to sit down,True,15.csv
+Fall when trying to sit down,True,2.csv
+Fall when trying to sit down,True,3.csv
+Fall when trying to sit down,True,4.csv
+Fall when trying to sit down,True,5.csv
+Fall when trying to sit down,True,6.csv
+Fall when trying to sit down,True,7.csv
+Fall when trying to sit down,True,8.csv
+Fall when trying to sit down,True,9.csv
+Jump,False,1.csv
+Jump,False,10.csv
+Jump,True,11.csv
+Jump,False,12.csv
+Jump,False,13.csv
+Jump,False,14.csv
+Jump,False,15.csv
+Jump,False,2.csv
+Jump,False,3.csv
+Jump,False,4.csv
+Jump,False,5.csv
+Jump,False,6.csv
+Jump,False,7.csv
+Jump,False,8.csv
+Jump,False,9.csv
+Lay down and keep still,True,1.csv
+Lay down and keep still,True,10.csv
+Lay down and keep still,False,11.csv
+Lay down and keep still,False,12.csv
+Lay down and keep still,True,13.csv
+Lay down and keep still,True,14.csv
+Lay down and keep still,False,15.csv
+Lay down and keep still,False,2.csv
+Lay down and keep still,False,3.csv
+Lay down and keep still,True,4.csv
+Lay down and keep still,True,5.csv
+Lay down and keep still,False,6.csv
+Lay down and keep still,False,7.csv
+Lay down and keep still,False,8.csv
+Lay down and keep still,False,9.csv
+Sit down and stand up,False,1.csv
+Sit down and stand up,False,10.csv
+Sit down and stand up,False,11.csv
+Sit down and stand up,False,12.csv
+Sit down and stand up,False,13.csv
+Sit down and stand up,False,14.csv
+Sit down and stand up,False,15.csv
+Sit down and stand up,False,2.csv
+Sit down and stand up,False,3.csv
+Sit down and stand up,False,4.csv
+Sit down and stand up,False,5.csv
+Sit down and stand up,False,6.csv
+Sit down and stand up,False,7.csv
+Sit down and stand up,False,8.csv
+Sit down and stand up,False,9.csv
+Waking up early,True,1.csv
+Waking up early,False,10.csv
+Waking up early,True,11.csv
+Waking up early,True,12.csv
+Waking up early,True,13.csv
+Waking up early,False,14.csv
+Waking up early,True,15.csv
+Waking up early,True,2.csv
+Waking up early,True,3.csv
+Waking up early,True,4.csv
+Waking up early,True,5.csv
+Waking up early,True,6.csv
+Waking up early,False,7.csv
+Waking up early,False,8.csv
+Waking up early,False,9.csv
+Walk,False,1.csv
+Walk,False,10.csv
+Walk,False,11.csv
+Walk,False,12.csv
+Walk,False,13.csv
+Walk,False,14.csv
+Walk,False,15.csv
+Walk,False,2.csv
+Walk,False,3.csv
+Walk,False,4.csv
+Walk,False,5.csv
+Walk,False,6.csv
+Walk,True,7.csv
+Walk,False,8.csv
+Walk,False,9.csv
