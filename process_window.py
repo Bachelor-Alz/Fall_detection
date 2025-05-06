@@ -6,8 +6,13 @@ def process_window(df: pd.DataFrame, window_size: int, step_size: int, include_m
     columns_to_use = ['gyro_x_list', 'gyro_y_list', 'gyro_z_list', 
                       'accel_x_list', 'accel_y_list', 'accel_z_list']
     
+
     data = df[columns_to_use].values  
-    num_windows = (len(data) - window_size) // step_size  
+
+    if len(data) < window_size:
+        return pd.DataFrame()
+
+    num_windows = max(1, (len(data) - window_size) // step_size)  
     features = []
 
     # Pre-extract metadata if needed
