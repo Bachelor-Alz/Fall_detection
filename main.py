@@ -35,8 +35,8 @@ class RequestBody(BaseModel):
     readings: List[IMUDataPoint]
 
 class ResponseBody(BaseModel):
-    mac: str
-    predictions: List[int]
+    Mac: str
+    Predictions: List[int]
 
 @app.post("/predict", response_model=ResponseBody)
 async def predict(data: RequestBody, background_tasks: BackgroundTasks): 
@@ -59,17 +59,18 @@ async def predict(data: RequestBody, background_tasks: BackgroundTasks):
         pca_features = pd.DataFrame(pca_features, columns=[f'PC{i+1}' for i in range(pca_features.shape[1])])
         prediction = model.predict(pca_features)
         prediction_list = prediction.tolist()
+        body = {"Mac": data.mac, "Predictions": prediction_list}
         background_tasks.add_task(send_prediction, prediction_list)
-        return {"mac": data.mac, "predictions": prediction_list}
+        return body
 
     
     except Exception as e:
         print(e)
         raise HTTPException(status_code=500, detail=str(e))
 
-async def send_prediction(list):
+async def send_prediction(body):
     async with httpx.AsyncClient() as client:
-        await client.post("http://healthdevice_app:5171/AI/compute", json=list)
+        await client.post("http://healthdevice_app:5171/AI/compute", json=body)
 
 def pre_process(df: pd.DataFrame):
     """Pre-processes data: resample to 50Hz, scale sensor data, and apply Gaussian smoothing per filename"""
