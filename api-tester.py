@@ -15,7 +15,7 @@ def send_request(i):
 
 start_time = time.time()
 with ThreadPoolExecutor() as executor:
-    responses = list(executor.map(send_request, range(1000)))
+    responses = list(executor.map(send_request, range(1)))
 
 end_time = time.time()
 
