@@ -73,7 +73,7 @@ async def predict(data: RequestBody, background_tasks: BackgroundTasks):
 async def send_prediction(body):
     print("Sending to .NET backend:", json.dumps(body))
     async with httpx.AsyncClient() as client:
-        await client.post("http://localhost:5171/AI/compute", json=body)
+        await client.post("http://healthdevice_app:5171/AI/compute", json=body)
 
 def pre_process(df: pd.DataFrame):
     """Pre-processes data: resample to 50Hz, scale sensor data, and apply Gaussian smoothing per filename"""
