@@ -1,3 +1,4 @@
+import json
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from typing import List
@@ -60,7 +61,7 @@ async def predict(data: RequestBody, background_tasks: BackgroundTasks):
         prediction = model.predict(pca_features)
         prediction_list = prediction.tolist()
         body = {"Mac": data.mac, "Predictions": prediction_list}
-        background_tasks.add_task(send_prediction, prediction_list)
+        background_tasks.add_task(send_prediction, body)
         return body
 
     
@@ -69,8 +70,9 @@ async def predict(data: RequestBody, background_tasks: BackgroundTasks):
         raise HTTPException(status_code=500, detail=str(e))
 
 async def send_prediction(body):
+    print("Sending to .NET backend:", json.dumps(body))
     async with httpx.AsyncClient() as client:
-        await client.post("http://healthdevice_app:5171/AI/compute", json=body)
+        await client.post("http://localhost:5171/AI/compute", json=body)
 
 def pre_process(df: pd.DataFrame):
     """Pre-processes data: resample to 50Hz, scale sensor data, and apply Gaussian smoothing per filename"""
