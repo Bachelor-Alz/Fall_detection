@@ -60,8 +60,9 @@ async def predict(data: RequestBody, background_tasks: BackgroundTasks):
         pca_features = pd.DataFrame(pca_features, columns=[f'PC{i+1}' for i in range(pca_features.shape[1])])
         prediction = model.predict(pca_features)
         prediction_list = prediction.tolist()
-        body = {"Mac": data.mac, "Predictions": prediction_list}
+        body = {"mac": data.mac, "predictions": prediction_list}
         background_tasks.add_task(send_prediction, body)
+
         return body
 
     
