@@ -2,10 +2,11 @@ import os
 import numpy as np
 import pandas as pd
 import httpx
+from typing import Optional
 
 def has_five_consecutive_ones(arr):
     count = 0
-    for num in arr:
+    for _, num in enumerate(arr):
         if num == 1:
             count += 1
             if count >= 4:
@@ -14,7 +15,7 @@ def has_five_consecutive_ones(arr):
             count = 0
     return False
 
-def send_request(df: pd.DataFrame, folder_name: str, file_name: str = None):
+def send_request(df: pd.DataFrame, folder_name: str, file_name: Optional[str] = None):
     url = "http://localhost:9999/predict"
     headers = {"Content-Type": "application/json"}
     df.dropna(inplace=True)
@@ -35,7 +36,7 @@ def send_request(df: pd.DataFrame, folder_name: str, file_name: str = None):
         print(f"No data received for {folder_name}")
         return
     is_fall = has_five_consecutive_ones(response_data)
-    results.loc[len(results)] = [folder_name, is_fall, file_name]
+    results.loc[len(results)] = [folder_name, is_fall, file_name, response_data]
 
 def get_recording_results():
     folder_path = os.path.join(os.getcwd(), folder)
@@ -51,7 +52,7 @@ def get_recording_results():
 
 folder = 'recordings'
 cols = ['ax', 'ay', 'az', 'gx', 'gy', 'gz']
-results = pd.DataFrame(columns=['folder_name', 'is_fall', 'file_name'])
+results = pd.DataFrame(columns=['folder_name', 'is_fall', 'file_name', 'predictions'])
 get_recording_results()
 
 activity_table = pd.DataFrame(columns=['activity', 'is_fall_count'])

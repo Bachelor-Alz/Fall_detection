@@ -1,12 +1,11 @@
 activity,is_fall_count
-
-Lay down attempt to get up, and then fall,10
+Walk,1
+Lay down and keep still,6
 Fall sideways (Left),11
+Lay down attempt to get up and then fall,10
 Fall forwards,13
 Fall when trying to sit down,13
 Fall sideways (Right),9
-Walk,1
 Jump,1
 Sit down and stand up,0
 Clap,1
-Lay down and keep still,6
